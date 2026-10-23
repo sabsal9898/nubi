@@ -5,5 +5,13 @@ service cloud.firestore {
     match /rehearsal_sessions/{sessionId} {
       allow read, write: if true;
     }
+    // Shared settings such as quick-select band members
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+    // Connection test document
+    match /test/{testId} {
+      allow read, write: if true;
+    }
   }
 }

@@ -20,6 +20,81 @@ export const PART_KEYS: PartType[] = [
   'notes',
 ];
 
+export const KOREAN_DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+/**
+ * Returns Korean day of week name ('일', '월', '화', '수', '목', '금', '토')
+ */
+export function getKoreanDayOfWeek(year: number, month: number, day: number): string {
+  const d = new Date(year, month - 1, day);
+  if (isNaN(d.getTime())) return '';
+  return KOREAN_DAY_NAMES[d.getDay()] || '';
+}
+
+/**
+ * Returns today's date formatted as { dateKey: 'YYYY-MM-DD', dateStr: 'YYYY년 M월 D일 (요일)' }
+ */
+export function getFormattedToday(): { dateKey: string; dateStr: string } {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const d = now.getDate();
+  const dateKey = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const dayName = KOREAN_DAY_NAMES[now.getDay()];
+  const dateStr = `${y}년 ${m}월 ${d}일 (${dayName})`;
+  return { dateKey, dateStr };
+}
+
+/**
+ * Parses any date string (e.g. "2026-07-30", "2026년 7월 30일", "2026년 7월 30일 (목)")
+ * and formats it consistently as "YYYY년 M월 D일 (요일)".
+ * Strips existing "(요일)" to prevent duplicate parentheses like "(목) (목)".
+ */
+export function formatSessionDateWithDay(
+  dateStr?: string | null,
+  fallbackDateKey?: string | null
+): string {
+  if (!dateStr && !fallbackDateKey) return '';
+  const raw = (dateStr || fallbackDateKey || '').trim();
+
+  // Strip any existing trailing day pattern like (월), (화), (수), (목), (금), (토), (일)
+  const cleaned = raw.replace(/\s*[\(\[][일월화수목금토]요일?[\)\]]/g, '').trim();
+
+  // 1. Try matching YYYY-MM-DD or YYYY.MM.DD or YYYY/MM/DD
+  const isoMatch = cleaned.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (isoMatch) {
+    const y = parseInt(isoMatch[1], 10);
+    const m = parseInt(isoMatch[2], 10);
+    const d = parseInt(isoMatch[3], 10);
+    const day = getKoreanDayOfWeek(y, m, d);
+    return day ? `${y}년 ${m}월 ${d}일 (${day})` : `${y}년 ${m}월 ${d}일`;
+  }
+
+  // 2. Try matching Korean format: YYYY년 M월 D일
+  const korMatch = cleaned.match(/(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일?/);
+  if (korMatch) {
+    const y = parseInt(korMatch[1], 10);
+    const m = parseInt(korMatch[2], 10);
+    const d = parseInt(korMatch[3], 10);
+    const day = getKoreanDayOfWeek(y, m, d);
+    return day ? `${y}년 ${m}월 ${d}일 (${day})` : `${y}년 ${m}월 ${d}일`;
+  }
+
+  // 3. Fallback: check fallbackDateKey if provided
+  if (fallbackDateKey && fallbackDateKey !== raw) {
+    const keyMatch = fallbackDateKey.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (keyMatch) {
+      const y = parseInt(keyMatch[1], 10);
+      const m = parseInt(keyMatch[2], 10);
+      const d = parseInt(keyMatch[3], 10);
+      const day = getKoreanDayOfWeek(y, m, d);
+      return day ? `${y}년 ${m}월 ${d}일 (${day})` : `${y}년 ${m}월 ${d}일`;
+    }
+  }
+
+  return cleaned;
+}
+
 /**
  * Parses date string (e.g. "2026-11-26", "2026년 11월 26일") to comparable timestamp
  */
@@ -87,7 +162,10 @@ export function getTotalParticipantsCount(session: RehearsalSession): number {
  * Generates KakaoTalk formatted text for clipboard sharing
  */
 export function generateKakaoNotice(session: RehearsalSession): string {
-  const date = session.dateStr || session.dateKey;
+  const date =
+    formatSessionDateWithDay(session.dateStr, session.dateKey) ||
+    session.dateStr ||
+    session.dateKey;
   const totalCount = getTotalParticipantsCount(session);
   const songCount = session.songs.length;
 

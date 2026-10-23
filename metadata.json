@@ -1,6 +1,6 @@
 {
-  "name": "누비밴드 합주 파트배분 매니저",
-  "description": "구글 스프레드시트 스타일의 누비밴드 합주 선곡 & 파트 배분 관리 웹 애플리케이션",
+  "name": "누비밴드 합주 파트배분",
+  "description": "누비밴드 합주 선곡 & 파트 배분 관리 웹 애플리케이션",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

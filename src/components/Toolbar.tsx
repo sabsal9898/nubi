@@ -11,7 +11,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { RehearsalSession } from '../types';
-import { sortSessionsDescending } from '../utils/sheetUtils';
+import { sortSessionsDescending, formatSessionDateWithDay } from '../utils/sheetUtils';
 
 interface ToolbarProps {
   sessions: RehearsalSession[];
@@ -101,7 +101,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           >
             {sortedSessions.map((sess) => (
               <option key={sess.id} value={sess.id}>
-                {sess.dateStr}
+                {formatSessionDateWithDay(sess.dateStr, sess.dateKey)}
               </option>
             ))}
           </select>
@@ -228,7 +228,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             </div>
             <div>
               <h1 className="text-base lg:text-lg font-bold text-gray-900 tracking-tight leading-none">
-                누비 밴드 파트 배분
+                누비밴드 파트 배분
               </h1>
               <span className="text-[11px] text-gray-500 font-normal">
                 Noobi Band Practice Part Manager
@@ -266,7 +266,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               N
             </div>
             <h1 className="text-sm font-bold text-gray-900 tracking-tight leading-none">
-              누비 밴드 파트 배분
+              누비밴드 파트 배분
             </h1>
           </div>
 

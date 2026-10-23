@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "RehearsalSession": {
+      "title": "RehearsalSession",
+      "description": "Band rehearsal session with date and song list",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique session identifier"
+        },
+        "dateStr": {
+          "type": "string",
+          "description": "Formatted rehearsal date string"
+        },
+        "dateKey": {
+          "type": "string",
+          "description": "ISO date key (YYYY-MM-DD)"
+        },
+        "sheetTitle": {
+          "type": "string",
+          "description": "Title of the rehearsal sheet"
+        },
+        "songs": {
+          "type": "array",
+          "description": "List of songs rehearsed in this session"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp of session creation"
+        }
+      },
+      "required": ["id", "dateStr", "dateKey", "songs"]
+    },
+    "BandSettings": {
+      "title": "BandSettings",
+      "description": "Band settings including shared member tags",
+      "type": "object",
+      "properties": {
+        "members": {
+          "type": "array",
+          "description": "List of band member names for quick selection"
+        }
+      },
+      "required": ["members"]
+    }
+  },
+  "firestore": {
+    "/rehearsal_sessions/{sessionId}": {
+      "schema": "RehearsalSession",
+      "description": "Individual rehearsal sessions partitioned by session ID"
+    },
+    "/settings/{settingId}": {
+      "schema": "BandSettings",
+      "description": "Global application and band settings such as member lists"
+    }
+  }
+}

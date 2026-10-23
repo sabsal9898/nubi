@@ -1,13 +1,19 @@
 import React, { useState } from 'react';
 import { Trash2, Edit2, AlertCircle, X } from 'lucide-react';
-import { RehearsalSession, PartType } from '../types';
-import { getAssignedMembersForPart } from '../utils/sheetUtils';
+import { RehearsalSession, PartType, Song } from '../types';
+import {
+  getAssignedMembersForPart,
+  formatSessionDateWithDay,
+  PART_LABELS,
+} from '../utils/sheetUtils';
+import { EditSongModal } from './EditSongModal';
 
 interface SheetTableProps {
   session: RehearsalSession;
   onUpdateSongPart: (songId: string, part: PartType, members: string[]) => void;
   onUpdateSongNotes: (songId: string, notes: string) => void;
   onUpdateSongTitle: (songId: string, title: string, artist: string) => void;
+  onUpdateSongInfo?: (songId: string, title: string, artist: string, notes: string) => void;
   onDeleteSong: (songId: string) => void;
   onOpenAssignModalWithSong?: (songId: string, part?: PartType) => void;
 }
@@ -17,15 +23,12 @@ export const SheetTable: React.FC<SheetTableProps> = ({
   onUpdateSongPart,
   onUpdateSongNotes,
   onUpdateSongTitle,
+  onUpdateSongInfo,
   onDeleteSong,
   onOpenAssignModalWithSong,
 }) => {
-  // Inline editing state: { songId, field: PartType | 'title' | 'artist' }
-  const [editingCell, setEditingCell] = useState<{
-    songId: string;
-    field: PartType | 'title' | 'artist';
-    value: string;
-  } | null>(null);
+  // Modal state for editing song title, artist & notes
+  const [songToEdit, setSongToEdit] = useState<Song | null>(null);
 
   // State for deletion confirm popup
   const [songToDelete, setSongToDelete] = useState<{
@@ -34,44 +37,17 @@ export const SheetTable: React.FC<SheetTableProps> = ({
     artist: string;
   } | null>(null);
 
-  const startInlineEdit = (
+  const handleSaveSongEdit = (
     songId: string,
-    field: PartType | 'title' | 'artist',
-    currentValue: string
+    title: string,
+    artist: string,
+    notes: string
   ) => {
-    setEditingCell({ songId, field, value: currentValue });
-  };
-
-  const saveInlineEdit = () => {
-    if (!editingCell) return;
-    const { songId, field, value } = editingCell;
-    const song = session.songs.find((s) => s.id === songId);
-    if (!song) {
-      setEditingCell(null);
-      return;
-    }
-
-    if (field === 'title') {
-      onUpdateSongTitle(songId, value.trim() || song.title, song.artist);
-    } else if (field === 'artist') {
-      onUpdateSongTitle(songId, song.title, value.trim());
-    } else if (field === 'notes') {
-      onUpdateSongNotes(songId, value.trim());
+    if (onUpdateSongInfo) {
+      onUpdateSongInfo(songId, title, artist, notes);
     } else {
-      const memberList = value
-        .split(',')
-        .map((m) => m.trim())
-        .filter((m) => m.length > 0);
-      onUpdateSongPart(songId, field as PartType, memberList);
-    }
-    setEditingCell(null);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      saveInlineEdit();
-    } else if (e.key === 'Escape') {
-      setEditingCell(null);
+      onUpdateSongTitle(songId, title, artist);
+      onUpdateSongNotes(songId, notes);
     }
   };
 
@@ -143,7 +119,7 @@ export const SheetTable: React.FC<SheetTableProps> = ({
     <div className="w-full p-0 sm:py-4 sm:px-4 lg:px-8">
       {/* Printable / Capturable Clean White Card */}
       <div
-        id="capture-sheet-area"
+        id="sheet-table-capture-area"
         className="bg-white border-y sm:border border-gray-200 sm:rounded-xl shadow-xs p-0 sm:p-5 w-full"
       >
         <div className="overflow-x-auto relative scrollbar-thin scrollbar-thumb-gray-300">
@@ -155,7 +131,7 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                   colSpan={1}
                   className="sticky left-0 z-20 bg-[#fed7aa] text-gray-900 font-bold py-2.5 px-3 text-center tracking-tight text-xs sm:text-sm select-none border-r border-b border-gray-300 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.15)]"
                 >
-                  {session.dateStr}
+                  {formatSessionDateWithDay(session.dateStr, session.dateKey)}
                 </th>
                 <th
                   colSpan={7}
@@ -163,7 +139,8 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                 />
                 <th
                   data-html2canvas-ignore="true"
-                  className="w-10 bg-transparent border-b border-gray-300"
+                  data-col="manage"
+                  className="manage-col w-10 bg-transparent border-b border-gray-300"
                 />
               </tr>
 
@@ -183,7 +160,8 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                 ))}
                 <th
                   data-html2canvas-ignore="true"
-                  className="w-10 bg-gray-50 border-r border-b border-gray-300 text-[11px] text-gray-400 font-normal py-2 px-1 text-center"
+                  data-col="manage"
+                  className="manage-col w-10 bg-gray-50 border-r border-b border-gray-300 text-[11px] text-gray-400 font-normal py-2 px-1 text-center"
                 >
                   관리
                 </th>
@@ -232,7 +210,11 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                   -
                 </td>
 
-                <td data-html2canvas-ignore="true" className="bg-gray-50/50 border-r border-b border-gray-300" />
+                <td
+                  data-html2canvas-ignore="true"
+                  data-col="manage"
+                  className="manage-col bg-gray-50/50 border-r border-b border-gray-300"
+                />
               </tr>
 
               {/* Song Rows */}
@@ -241,36 +223,18 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                   key={song.id}
                   className="group hover:bg-blue-50/20 transition-colors"
                 >
-                  {/* Song Title & Artist Cell (Sticky Left on Mobile with Opaque White Background) */}
+                  {/* Song Title & Artist Cell (Sticky Left on Mobile with Opaque White Background) - Read-only to prevent accidental touch edits */}
                   <td
-                    onDoubleClick={() =>
-                      startInlineEdit(song.id, 'title', `${song.title} - ${song.artist}`)
-                    }
-                    className="sticky left-0 z-10 bg-white group-hover:bg-[#f8fafd] py-2.5 px-2.5 sm:px-3 text-left font-medium cursor-pointer border-r border-b border-gray-300 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.15)]"
+                    className="sticky left-0 z-10 bg-white group-hover:bg-[#f8fafd] py-2.5 px-2.5 sm:px-3 text-left font-medium border-r border-b border-gray-300 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.15)] select-text"
                   >
-                    {editingCell?.songId === song.id && editingCell?.field === 'title' ? (
-                      <input
-                        type="text"
-                        value={editingCell.value}
-                        onChange={(e) =>
-                          setEditingCell({ ...editingCell, value: e.target.value })
-                        }
-                        onKeyDown={handleKeyDown}
-                        onBlur={saveInlineEdit}
-                        autoFocus
-                        className="w-full text-xs py-1 px-1.5 border border-blue-500 rounded bg-white shadow-xs focus:outline-none"
-                        placeholder="곡명 - 아티스트"
-                      />
-                    ) : (
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1.5">
-                        <span className="font-semibold text-gray-900 leading-tight">
-                          {song.title}
-                        </span>
-                        <span className="text-gray-500 font-normal text-[11px] sm:text-xs truncate">
-                          - {song.artist}
-                        </span>
-                      </div>
-                    )}
+                    <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-1.5">
+                      <span className="font-semibold text-gray-900 leading-tight">
+                        {song.title}
+                      </span>
+                      <span className="text-gray-500 font-normal text-[11px] sm:text-xs truncate">
+                        - {song.artist}
+                      </span>
+                    </div>
                   </td>
 
                   {/* Part Cells */}
@@ -285,56 +249,56 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                       { key: 'notes' },
                     ] as const
                   ).map(({ key }) => {
-                    const isEditing =
-                      editingCell?.songId === song.id && editingCell?.field === key;
                     const rawValue =
                       key === 'notes' ? song.notes : song[key].join(', ');
+                    const hasMembers = key !== 'notes' && song[key].length > 0;
 
                     return (
                       <td
                         key={key}
-                        onDoubleClick={() => {
+                        onClick={() => {
                           if (key === 'notes') {
-                            startInlineEdit(song.id, 'notes', song.notes);
+                            setSongToEdit(song);
                           } else {
-                            startInlineEdit(song.id, key, song[key].join(', '));
+                            onOpenAssignModalWithSong?.(song.id, key as PartType);
                           }
                         }}
-                        className="py-2 px-1.5 sm:px-2 text-center text-xs sm:text-sm text-gray-900 cursor-pointer min-h-[38px] hover:bg-blue-50/30 break-keep border-r border-b border-gray-300"
+                        title={
+                          key === 'notes'
+                            ? '비고 수정 (클릭 시 수정 창 열림)'
+                            : hasMembers
+                            ? `${song.title} [${PART_LABELS[key as PartType]}]: ${rawValue} (클릭하여 배정 인원 관리/추가)`
+                            : `${song.title} [${PART_LABELS[key as PartType]}] 파트원 배정 및 신청하기 (클릭)`
+                        }
+                        className="py-2 px-1.5 sm:px-2 text-center text-xs sm:text-sm text-gray-900 cursor-pointer min-h-[38px] hover:bg-blue-100/60 active:bg-blue-200/60 break-keep border-r border-b border-gray-300 transition-colors select-none group/cell"
                       >
-                        {isEditing ? (
-                          <input
-                            type="text"
-                            value={editingCell.value}
-                            onChange={(e) =>
-                              setEditingCell({ ...editingCell, value: e.target.value })
+                        <div className="flex items-center justify-center min-h-[22px] leading-tight">
+                          <span
+                            className={
+                              rawValue
+                                ? 'font-medium text-gray-900'
+                                : 'text-gray-300 group-hover/cell:text-blue-500 font-normal transition-colors'
                             }
-                            onKeyDown={handleKeyDown}
-                            onBlur={saveInlineEdit}
-                            autoFocus
-                            placeholder={key === 'notes' ? '비고' : '이름 (쉼표)'}
-                            className="w-full text-center text-xs py-1 px-1 border border-blue-500 rounded bg-white shadow-xs focus:outline-none"
-                          />
-                        ) : (
-                          <div className="flex items-center justify-center min-h-[22px] leading-tight">
-                            <span>{rawValue}</span>
-                          </div>
-                        )}
+                          >
+                            {rawValue || (key === 'notes' ? '' : '-')}
+                          </span>
+                        </div>
                       </td>
                     );
                   })}
 
-                  {/* Row Management (Edit & Delete - always accessible) */}
+                  {/* Row Management (Edit Song Info & Delete - always accessible) */}
                   <td
                     data-html2canvas-ignore="true"
-                    className="px-1 text-center align-middle bg-white group-hover:bg-[#f8fafd] border-r border-b border-gray-300"
+                    data-col="manage"
+                    className="manage-col px-1 text-center align-middle bg-white group-hover:bg-[#f8fafd] border-r border-b border-gray-300"
                   >
                     <div className="flex items-center justify-center gap-1">
                       <button
                         type="button"
-                        onClick={() => onOpenAssignModalWithSong?.(song.id)}
-                        title="파트 배정/수정"
-                        className="p-1.5 text-blue-600 hover:bg-blue-50 active:bg-blue-100 rounded transition"
+                        onClick={() => setSongToEdit(song)}
+                        title="곡 정보 수정 (곡명, 아티스트, 비고)"
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 active:bg-blue-100 rounded transition cursor-pointer"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -348,7 +312,7 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                           })
                         }
                         title="이 합주에서 곡 삭제"
-                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded transition"
+                        className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 active:bg-rose-100 rounded transition cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -360,6 +324,17 @@ export const SheetTable: React.FC<SheetTableProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Edit Song Information Modal (Title, Artist, Notes with Parts Preserved) */}
+      <EditSongModal
+        isOpen={Boolean(songToEdit)}
+        song={songToEdit}
+        onClose={() => setSongToEdit(null)}
+        onSave={(songId, title, artist, notes) => {
+          handleSaveSongEdit(songId, title, artist, notes);
+          setSongToEdit(null);
+        }}
+      />
 
       {/* Delete Confirmation In-App Modal (replaces browser confirm) */}
       {songToDelete && (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { toPng, toBlob } from 'html-to-image';
+import html2canvas from 'html2canvas';
 import confetti from 'canvas-confetti';
 import { AlertCircle } from 'lucide-react';
 import { RehearsalSession, Song, PartType } from './types';
@@ -9,11 +9,17 @@ import { SheetTable } from './components/SheetTable';
 import { PartAssignmentModal } from './components/PartAssignmentModal';
 import { AddSongModal } from './components/AddSongModal';
 import { AddDateModal } from './components/AddDateModal';
-import { sortSessionsDescending } from './utils/sheetUtils';
+import { sortSessionsDescending, formatSessionDateWithDay } from './utils/sheetUtils';
 import {
   subscribeToRehearsalSessions,
   saveSession,
   removeSession,
+  atomicAddSong,
+  atomicDeleteSong,
+  atomicUpdateSongInfo,
+  atomicAssignMember,
+  atomicRemoveMember,
+  atomicUpdateSongPartMembers,
   loadLocalSessions,
   LOCAL_STORAGE_KEY,
 } from './services/firestoreService';
@@ -125,7 +131,7 @@ export default function App() {
       return;
     }
 
-    const deletedDateStr = activeSession.dateStr;
+    const deletedDateStr = formatSessionDateWithDay(activeSession.dateStr, activeSession.dateKey) || activeSession.dateStr;
     const sessionToDeleteId = activeSessionId;
     const remaining = sessions.filter((s) => s.id !== sessionToDeleteId);
     const sortedRemaining = sortSessionsDescending(remaining);
@@ -171,9 +177,11 @@ export default function App() {
       }));
     }
 
+    const formattedDateStr = formatSessionDateWithDay(dateStr, dateKey) || dateStr;
+
     const newSession: RehearsalSession = {
       id: newSessionId,
-      dateStr,
+      dateStr: formattedDateStr,
       dateKey,
       sheetTitle: activeSession?.sheetTitle || '누비 밴드 파트 배분',
       songs: songsToCarry,
@@ -187,7 +195,7 @@ export default function App() {
     });
 
     setActiveSessionId(newSessionId);
-    showToast(`📅 '${dateStr}' 합주가 추가되었습니다! (${songsToCarry.length}개 곡 이월)`);
+    showToast(`📅 '${formattedDateStr}' 합주가 추가되었습니다! (${songsToCarry.length}개 곡 이월)`);
 
     // Isolated cloud sync
     try {
@@ -212,16 +220,15 @@ export default function App() {
       notes,
     };
 
-    let targetUpdatedSession: RehearsalSession | null = null;
-
+    const now = Date.now();
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id === activeSessionId) {
-          targetUpdatedSession = {
+          return {
             ...s,
+            updatedAt: now,
             songs: [newSong, ...s.songs],
           };
-          return targetUpdatedSession;
         }
         return s;
       });
@@ -231,27 +238,25 @@ export default function App() {
 
     showToast(`🎵 새 곡 '${title}'이(가) 추가되었습니다!`);
 
-    if (targetUpdatedSession) {
-      try {
-        await saveSession(targetUpdatedSession);
-      } catch (e) {
-        console.warn('Cloud sync skipped:', e);
-      }
+    // Atomic transaction for Firestore
+    try {
+      await atomicAddSong(activeSessionId, newSong);
+    } catch (e) {
+      console.warn('Cloud atomicAddSong skipped:', e);
     }
   };
 
   // Handler: Delete song from current session only
   const handleDeleteSong = async (songId: string) => {
-    let targetUpdatedSession: RehearsalSession | null = null;
-
+    const now = Date.now();
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id === activeSessionId) {
-          targetUpdatedSession = {
+          return {
             ...s,
+            updatedAt: now,
             songs: s.songs.filter((song) => song.id !== songId),
           };
-          return targetUpdatedSession;
         }
         return s;
       });
@@ -261,12 +266,11 @@ export default function App() {
 
     showToast('곡이 현재 합주 목록에서 삭제되었습니다.');
 
-    if (targetUpdatedSession) {
-      try {
-        await saveSession(targetUpdatedSession);
-      } catch (e) {
-        console.warn('Cloud sync skipped:', e);
-      }
+    // Atomic transaction for Firestore
+    try {
+      await atomicDeleteSong(activeSessionId, songId);
+    } catch (e) {
+      console.warn('Cloud atomicDeleteSong skipped:', e);
     }
   };
 
@@ -276,18 +280,17 @@ export default function App() {
     title: string,
     artist: string
   ) => {
-    let targetUpdatedSession: RehearsalSession | null = null;
-
+    const now = Date.now();
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id === activeSessionId) {
-          targetUpdatedSession = {
+          return {
             ...s,
+            updatedAt: now,
             songs: s.songs.map((song) =>
               song.id === songId ? { ...song, title, artist } : song
             ),
           };
-          return targetUpdatedSession;
         }
         return s;
       });
@@ -295,29 +298,77 @@ export default function App() {
       return next;
     });
 
-    if (targetUpdatedSession) {
-      try {
-        await saveSession(targetUpdatedSession);
-      } catch (e) {
-        console.warn('Cloud sync skipped:', e);
-      }
+    // Atomic transaction for Firestore
+    try {
+      await atomicUpdateSongInfo(activeSessionId, songId, { title, artist });
+    } catch (e) {
+      console.warn('Cloud atomicUpdateSongInfo skipped:', e);
+    }
+  };
+
+  // Handler: Update song title, artist, and notes atomically preserving all part assignments
+  const handleUpdateSongInfo = async (
+    songId: string,
+    title: string,
+    artist: string,
+    notes: string
+  ) => {
+    const cleanTitle = title.trim();
+    const cleanArtist = artist.trim();
+    const cleanNotes = notes.trim();
+    const now = Date.now();
+
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            updatedAt: now,
+            songs: s.songs.map((song) =>
+              song.id === songId
+                ? {
+                    ...song,
+                    title: cleanTitle,
+                    artist: cleanArtist,
+                    notes: cleanNotes,
+                  }
+                : song
+            ),
+          };
+        }
+        return s;
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
+
+    showToast(`🎵 '${cleanTitle}' 곡 정보가 수정되었습니다.`);
+
+    // Atomic transaction for Firestore
+    try {
+      await atomicUpdateSongInfo(activeSessionId, songId, {
+        title: cleanTitle,
+        artist: cleanArtist,
+        notes: cleanNotes,
+      });
+    } catch (e) {
+      console.warn('Cloud atomicUpdateSongInfo skipped:', e);
     }
   };
 
   // Handler: Update song notes
   const handleUpdateSongNotes = async (songId: string, notes: string) => {
-    let targetUpdatedSession: RehearsalSession | null = null;
-
+    const now = Date.now();
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id === activeSessionId) {
-          targetUpdatedSession = {
+          return {
             ...s,
+            updatedAt: now,
             songs: s.songs.map((song) =>
               song.id === songId ? { ...song, notes } : song
             ),
           };
-          return targetUpdatedSession;
         }
         return s;
       });
@@ -325,12 +376,11 @@ export default function App() {
       return next;
     });
 
-    if (targetUpdatedSession) {
-      try {
-        await saveSession(targetUpdatedSession);
-      } catch (e) {
-        console.warn('Cloud sync skipped:', e);
-      }
+    // Atomic transaction for Firestore
+    try {
+      await atomicUpdateSongInfo(activeSessionId, songId, { notes });
+    } catch (e) {
+      console.warn('Cloud atomicUpdateSongInfo skipped:', e);
     }
   };
 
@@ -342,13 +392,13 @@ export default function App() {
   ) => {
     if (part === 'notes') return;
 
-    let targetUpdatedSession: RehearsalSession | null = null;
-
+    const now = Date.now();
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id === activeSessionId) {
-          targetUpdatedSession = {
+          return {
             ...s,
+            updatedAt: now,
             songs: s.songs.map((song) => {
               if (song.id === songId) {
                 return { ...song, [part]: members };
@@ -356,7 +406,6 @@ export default function App() {
               return song;
             }),
           };
-          return targetUpdatedSession;
         }
         return s;
       });
@@ -364,12 +413,11 @@ export default function App() {
       return next;
     });
 
-    if (targetUpdatedSession) {
-      try {
-        await saveSession(targetUpdatedSession);
-      } catch (e) {
-        console.warn('Cloud sync skipped:', e);
-      }
+    // Atomic transaction for Firestore
+    try {
+      await atomicUpdateSongPartMembers(activeSessionId, songId, part, members);
+    } catch (e) {
+      console.warn('Cloud atomicUpdateSongPartMembers skipped:', e);
     }
   };
 
@@ -384,13 +432,13 @@ export default function App() {
       return;
     }
 
-    let targetUpdatedSession: RehearsalSession | null = null;
-
+    const now = Date.now();
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id === activeSessionId) {
-          targetUpdatedSession = {
+          return {
             ...s,
+            updatedAt: now,
             songs: s.songs.map((song) => {
               if (song.id === songId) {
                 const currentList = song[part] || [];
@@ -404,7 +452,6 @@ export default function App() {
               return song;
             }),
           };
-          return targetUpdatedSession;
         }
         return s;
       });
@@ -414,12 +461,11 @@ export default function App() {
 
     showToast(`✅ [${memberName}]님이 배정되었습니다.`);
 
-    if (targetUpdatedSession) {
-      try {
-        await saveSession(targetUpdatedSession);
-      } catch (e) {
-        console.warn('Cloud sync skipped:', e);
-      }
+    // Atomic transaction for Firestore
+    try {
+      await atomicAssignMember(activeSessionId, songId, part, memberName);
+    } catch (e) {
+      console.warn('Cloud atomicAssignMember skipped:', e);
     }
   };
 
@@ -431,13 +477,13 @@ export default function App() {
   ) => {
     if (part === 'notes') return;
 
-    let targetUpdatedSession: RehearsalSession | null = null;
-
+    const now = Date.now();
     setSessions((prev) => {
       const next = prev.map((s) => {
         if (s.id === activeSessionId) {
-          targetUpdatedSession = {
+          return {
             ...s,
+            updatedAt: now,
             songs: s.songs.map((song) => {
               if (song.id === songId) {
                 return {
@@ -448,7 +494,6 @@ export default function App() {
               return song;
             }),
           };
-          return targetUpdatedSession;
         }
         return s;
       });
@@ -458,12 +503,11 @@ export default function App() {
 
     showToast('파트에서 제외되었습니다.');
 
-    if (targetUpdatedSession) {
-      try {
-        await saveSession(targetUpdatedSession);
-      } catch (e) {
-        console.warn('Cloud sync skipped:', e);
-      }
+    // Atomic transaction for Firestore
+    try {
+      await atomicRemoveMember(activeSessionId, songId, part, memberName);
+    } catch (e) {
+      console.warn('Cloud atomicRemoveMember skipped:', e);
     }
   };
 
@@ -476,28 +520,95 @@ export default function App() {
     await handleUpdateSongPart(songId, part, []);
   };
 
+  // Helper: Renders high-resolution, unclipped canvas of the entire table from "곡명" to "비고"
+  const generateSheetCanvas = async (): Promise<HTMLCanvasElement | null> => {
+    const element =
+      document.getElementById('sheet-table-capture-area') ||
+      document.getElementById('capture-sheet-area');
+    if (!element) return null;
+
+    // Determine the full scroll width of the table so mobile screens don't clip horizontal columns
+    const fullScrollWidth = Math.max(element.scrollWidth, element.offsetWidth, 780);
+
+    const canvas = await html2canvas(element, {
+      scale: 2, // 2x high resolution
+      useCORS: true,
+      logging: false,
+      scrollX: 0,
+      scrollY: 0,
+      width: fullScrollWidth,
+      windowWidth: fullScrollWidth,
+      backgroundColor: '#ffffff',
+      ignoreElements: (node) => {
+        return (
+          node.getAttribute('data-html2canvas-ignore') === 'true' ||
+          node.getAttribute('data-col') === 'manage' ||
+          node.classList.contains('manage-col')
+        );
+      },
+      onclone: (clonedDoc) => {
+        const clonedElement =
+          clonedDoc.getElementById('sheet-table-capture-area') ||
+          clonedDoc.getElementById('capture-sheet-area');
+
+        if (clonedElement) {
+          clonedElement.style.overflow = 'visible';
+          clonedElement.style.width = 'auto';
+          clonedElement.style.maxWidth = 'none';
+
+          // Expand any horizontal scroll wrappers in cloned DOM
+          clonedElement
+            .querySelectorAll<HTMLElement>('.overflow-x-auto, [class*="overflow-x"]')
+            .forEach((el) => {
+              el.style.overflow = 'visible';
+              el.style.width = 'max-content';
+              el.style.maxWidth = 'none';
+            });
+
+          // Table should take natural max-content width
+          const table = clonedElement.querySelector<HTMLTableElement>('table');
+          if (table) {
+            table.style.width = 'max-content';
+            table.style.minWidth = '100%';
+          }
+
+          // In html2canvas, position: sticky on table cells can cause overlap/jitter in offscreen rendering.
+          // Neutralizing it in the cloned element ensures pristine table rendering.
+          clonedElement
+            .querySelectorAll<HTMLElement>('.sticky, [class*="sticky"]')
+            .forEach((el) => {
+              el.style.position = 'static';
+              el.style.boxShadow = 'none';
+            });
+        }
+
+        // Completely remove all manage column elements from the cloned DOM
+        clonedDoc
+          .querySelectorAll('.manage-col, [data-col="manage"], [data-html2canvas-ignore="true"]')
+          .forEach((el) => {
+            el.remove();
+          });
+      },
+    });
+
+    return canvas;
+  };
+
   // Handler: High Quality PNG Image File Download
   const handleCaptureImage = async () => {
-    const element = document.getElementById('capture-sheet-area');
-    if (!element) return;
-
     try {
       setIsCapturing(true);
 
-      const dataUrl = await toPng(element, {
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        filter: (node) => {
-          if (node instanceof HTMLElement && node.dataset.html2canvasIgnore === 'true') {
-            return false;
-          }
-          return true;
-        },
-      });
+      const canvas = await generateSheetCanvas();
+      if (!canvas) {
+        showToast('배정표 영역을 찾을 수 없습니다.');
+        return;
+      }
 
       const dateName = (activeSession.dateKey || '배정표').replace(/[^0-9-]/g, '');
       const fileName = `누비밴드_파트배분_${dateName || activeSession.dateStr}.png`;
 
+      const dataUrl = canvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.href = dataUrl;
       link.download = fileName;
@@ -520,42 +631,49 @@ export default function App() {
 
   // Handler: Clipboard Image Copy (Directly paste with Ctrl+V into KakaoTalk)
   const handleCopyImageToClipboard = async () => {
-    const element = document.getElementById('capture-sheet-area');
-    if (!element) return;
-
     try {
       setIsCopyingImage(true);
 
-      const blob = await toBlob(element, {
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        filter: (node) => {
-          if (node instanceof HTMLElement && node.dataset.html2canvasIgnore === 'true') {
-            return false;
+      const canvas = await generateSheetCanvas();
+      if (!canvas) {
+        showToast('배정표 영역을 찾을 수 없습니다.');
+        return;
+      }
+
+      const dateName = (activeSession.dateKey || '배정표').replace(/[^0-9-]/g, '');
+      const fileName = `누비밴드_파트배분_${dateName || activeSession.dateStr}.png`;
+
+      canvas.toBlob(async (blob) => {
+        try {
+          if (!blob) {
+            throw new Error('이미지 Blob 생성 실패');
           }
-          return true;
-        },
-      });
 
-      if (!blob) {
-        throw new Error('이미지 Blob 생성 실패');
-      }
-
-      if (navigator.clipboard && typeof window.ClipboardItem !== 'undefined') {
-        const item = new ClipboardItem({ 'image/png': blob });
-        await navigator.clipboard.write([item]);
-        showToast('📋 이미지가 클립보드에 복사되었습니다! 카톡에 바로 Ctrl+V 하세요.');
-      } else {
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `누비밴드_파트배분_${activeSession.dateKey || '배정표'}.png`;
-        link.click();
-        showToast('클립보드 직접 복사를 미지원하는 브라우저로 이미지 파일이 다운로드되었습니다.');
-      }
+          if (navigator.clipboard && typeof window.ClipboardItem !== 'undefined') {
+            const item = new ClipboardItem({ 'image/png': blob });
+            await navigator.clipboard.write([item]);
+            showToast('📋 이미지가 클립보드에 복사되었습니다! 카톡에 바로 Ctrl+V 하세요.');
+          } else {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            link.click();
+            showToast('클립보드 직접 복사를 미지원하는 브라우저로 이미지 파일이 다운로드되었습니다.');
+          }
+        } catch (clipErr) {
+          console.warn('Clipboard write fallback to download:', clipErr);
+          const link = document.createElement('a');
+          link.href = canvas.toDataURL('image/png');
+          link.download = fileName;
+          link.click();
+          showToast('클립보드 접근 제한으로 이미지 파일이 다운로드되었습니다.');
+        } finally {
+          setIsCopyingImage(false);
+        }
+      }, 'image/png');
     } catch (err) {
       console.error('Image clipboard copy error', err);
       showToast('클립보드 이미지 복사 실패: 브라우저 권한을 확인해주세요.');
-    } finally {
       setIsCopyingImage(false);
     }
   };
@@ -595,6 +713,7 @@ export default function App() {
           onUpdateSongPart={handleUpdateSongPart}
           onUpdateSongNotes={handleUpdateSongNotes}
           onUpdateSongTitle={handleUpdateSongTitle}
+          onUpdateSongInfo={handleUpdateSongInfo}
           onDeleteSong={handleDeleteSong}
           onOpenAssignModalWithSong={handleOpenAssignModalWithSong}
         />
@@ -638,7 +757,7 @@ export default function App() {
                   합주일 삭제 확인
                 </h3>
                 <p className="text-xs text-gray-600 mt-1 leading-relaxed">
-                  정말로 <strong>[{activeSession.dateStr}]</strong> 기록을 완전히 삭제하시겠습니까? 복구할 수 없습니다.
+                  정말로 <strong>[{formatSessionDateWithDay(activeSession.dateStr, activeSession.dateKey)}]</strong> 기록을 완전히 삭제하시겠습니까? 복구할 수 없습니다.
                 </p>
                 <p className="text-[11px] text-gray-400 mt-2">
                   * 삭제 후 남아 있는 최신 합주 회차로 자동 이동합니다.

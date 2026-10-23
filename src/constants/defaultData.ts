@@ -18,7 +18,7 @@ export const KNOWN_MEMBERS = [
 export const INITIAL_SESSIONS: RehearsalSession[] = [
   {
     id: 'session-2026-07-30',
-    dateStr: '2026년 7월 30일',
+    dateStr: '2026년 7월 30일 (목)',
     dateKey: '2026-07-30',
     sheetTitle: '누비 밴드 파트 배분',
     songs: [

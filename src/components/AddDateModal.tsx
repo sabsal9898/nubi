@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, CalendarPlus, CopyCheck } from 'lucide-react';
 import { RehearsalSession } from '../types';
+import {
+  getFormattedToday,
+  getKoreanDayOfWeek,
+  formatSessionDateWithDay,
+} from '../utils/sheetUtils';
 
 interface AddDateModalProps {
   isOpen: boolean;
@@ -15,15 +20,22 @@ export const AddDateModal: React.FC<AddDateModalProps> = ({
   lastSession,
   onAddSession,
 }) => {
-  if (!isOpen) return null;
-
-  // Compute a default date: roughly 2 weeks after last session date or today
-  const defaultDateStr = '2026년 8월 15일';
-  const defaultDateKey = '2026-08-15';
-
-  const [dateStr, setDateStr] = useState(defaultDateStr);
-  const [dateKey, setDateKey] = useState(defaultDateKey);
+  const initialToday = getFormattedToday();
+  const [dateStr, setDateStr] = useState(initialToday.dateStr);
+  const [dateKey, setDateKey] = useState(initialToday.dateKey);
   const [copyPrevious, setCopyPrevious] = useState(true);
+
+  // Automatically reset to today's date every time the modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const today = getFormattedToday();
+      setDateKey(today.dateKey);
+      setDateStr(today.dateStr);
+      setCopyPrevious(true);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
 
   const handleDateKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -31,7 +43,11 @@ export const AddDateModal: React.FC<AddDateModalProps> = ({
     if (val) {
       const [y, m, d] = val.split('-');
       if (y && m && d) {
-        setDateStr(`${y}년 ${parseInt(m, 10)}월 ${parseInt(d, 10)}일`);
+        const year = parseInt(y, 10);
+        const month = parseInt(m, 10);
+        const day = parseInt(d, 10);
+        const dayName = getKoreanDayOfWeek(year, month, day);
+        setDateStr(dayName ? `${year}년 ${month}월 ${day}일 (${dayName})` : `${year}년 ${month}월 ${day}일`);
       }
     }
   };
@@ -39,7 +55,8 @@ export const AddDateModal: React.FC<AddDateModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!dateStr.trim()) return;
-    onAddSession(dateStr.trim(), dateKey, copyPrevious);
+    const finalDateStr = formatSessionDateWithDay(dateStr.trim(), dateKey);
+    onAddSession(finalDateStr, dateKey, copyPrevious);
     onClose();
   };
 
@@ -115,7 +132,7 @@ export const AddDateModal: React.FC<AddDateModalProps> = ({
                   직전 합주 곡 & 파트 배정 자동 복사 (이월)
                 </span>
                 <p className="text-[11px] text-[#3c4043] mt-0.5 leading-snug">
-                  직전 회차({lastSession?.dateStr || '이전 합주'})의 {lastSession?.songs.length || 0}개 곡과
+                  직전 회차({formatSessionDateWithDay(lastSession?.dateStr, lastSession?.dateKey) || '이전 합주'})의 {lastSession?.songs.length || 0}개 곡과
                   배정된 멤버들을 새 합주 표에 그대로 복사합니다.
                 </p>
               </div>
