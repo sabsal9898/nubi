@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import html2canvas from 'html2canvas';
+import { toCanvas } from 'html-to-image';
 import confetti from 'canvas-confetti';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2 } from 'lucide-react';
 import { RehearsalSession, Song, PartType } from './types';
 import { INITIAL_SESSIONS } from './constants/defaultData';
 import { Toolbar } from './components/Toolbar';
@@ -9,6 +9,7 @@ import { SheetTable } from './components/SheetTable';
 import { PartAssignmentModal } from './components/PartAssignmentModal';
 import { AddSongModal } from './components/AddSongModal';
 import { AddDateModal } from './components/AddDateModal';
+import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { sortSessionsDescending, formatSessionDateWithDay } from './utils/sheetUtils';
 import {
   subscribeToRehearsalSessions,
@@ -52,6 +53,8 @@ export default function App() {
   const [isDeleteSessionModalOpen, setIsDeleteSessionModalOpen] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isCopyingImage, setIsCopyingImage] = useState(false);
+  const [previewImageDataUrl, setPreviewImageDataUrl] = useState<string | null>(null);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // 2. Automatic synchronization to localStorage on state changes
@@ -520,78 +523,83 @@ export default function App() {
     await handleUpdateSongPart(songId, part, []);
   };
 
-  // Helper: Renders high-resolution, unclipped canvas of the entire table from "곡명" to "비고"
-  const generateSheetCanvas = async (): Promise<HTMLCanvasElement | null> => {
-    const element =
+  // Helper: converts base64 dataUrl into Blob safely
+  const dataUrlToBlob = (dataUrl: string): Blob => {
+    const parts = dataUrl.split(';base64,');
+    const contentType = parts[0].split(':')[1] || 'image/png';
+    const raw = window.atob(parts[1]);
+    const rawLength = raw.length;
+    const uInt8Array = new Uint8Array(rawLength);
+    for (let i = 0; i < rawLength; ++i) {
+      uInt8Array[i] = raw.charCodeAt(i);
+    }
+    return new Blob([uInt8Array], { type: contentType });
+  };
+
+  // Helper: Renders high-resolution image directly from the real on-screen table DOM
+  // Applies temporary .is-capturing class for 100ms, captures canvas, and validates dimensions
+  const generateSheetPng = async (): Promise<string | null> => {
+    const tableContainer =
       document.getElementById('sheet-table-capture-area') ||
-      document.getElementById('capture-sheet-area');
-    if (!element) return null;
+      document.getElementById('table-capture-target') ||
+      (document.querySelector('[data-capture-target="true"]') as HTMLElement | null);
+    if (!tableContainer) {
+      throw new Error('배정표 영역을 찾을 수 없습니다.');
+    }
 
-    // Determine the full scroll width of the table so mobile screens don't clip horizontal columns
-    const fullScrollWidth = Math.max(element.scrollWidth, element.offsetWidth, 780);
+    // 1. Apply temporary capturing mode class to the real DOM element
+    tableContainer.classList.add('is-capturing');
 
-    const canvas = await html2canvas(element, {
-      scale: 2, // 2x high resolution
-      useCORS: true,
-      logging: false,
-      scrollX: 0,
-      scrollY: 0,
-      width: fullScrollWidth,
-      windowWidth: fullScrollWidth,
-      backgroundColor: '#ffffff',
-      ignoreElements: (node) => {
-        return (
-          node.getAttribute('data-html2canvas-ignore') === 'true' ||
-          node.getAttribute('data-col') === 'manage' ||
-          node.classList.contains('manage-col')
-        );
-      },
-      onclone: (clonedDoc) => {
-        const clonedElement =
-          clonedDoc.getElementById('sheet-table-capture-area') ||
-          clonedDoc.getElementById('capture-sheet-area');
+    try {
+      // 2. Allow 100ms for browser layout recalculation and stabilization
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-        if (clonedElement) {
-          clonedElement.style.overflow = 'visible';
-          clonedElement.style.width = 'auto';
-          clonedElement.style.maxWidth = 'none';
+      const targetWidth = Math.max(tableContainer.scrollWidth, 1050);
+      const targetHeight = Math.max(tableContainer.scrollHeight, 250);
 
-          // Expand any horizontal scroll wrappers in cloned DOM
-          clonedElement
-            .querySelectorAll<HTMLElement>('.overflow-x-auto, [class*="overflow-x"]')
-            .forEach((el) => {
-              el.style.overflow = 'visible';
-              el.style.width = 'max-content';
-              el.style.maxWidth = 'none';
-            });
-
-          // Table should take natural max-content width
-          const table = clonedElement.querySelector<HTMLTableElement>('table');
-          if (table) {
-            table.style.width = 'max-content';
-            table.style.minWidth = '100%';
+      const options = {
+        backgroundColor: '#ffffff',
+        pixelRatio: 2,
+        width: targetWidth,
+        height: targetHeight,
+        filter: (node: HTMLElement) => {
+          if (
+            node.classList &&
+            (node.classList.contains('manage-col') ||
+              node.getAttribute('data-col') === 'manage' ||
+              node.getAttribute('data-html2canvas-ignore') === 'true')
+          ) {
+            return false;
           }
+          return true;
+        },
+      };
 
-          // In html2canvas, position: sticky on table cells can cause overlap/jitter in offscreen rendering.
-          // Neutralizing it in the cloned element ensures pristine table rendering.
-          clonedElement
-            .querySelectorAll<HTMLElement>('.sticky, [class*="sticky"]')
-            .forEach((el) => {
-              el.style.position = 'static';
-              el.style.boxShadow = 'none';
-            });
-        }
+      // 3. Render real element directly to Canvas
+      let canvas: HTMLCanvasElement;
+      try {
+        canvas = await toCanvas(tableContainer, options);
+      } catch (renderErr) {
+        console.warn('Retrying capture with skipFonts:', renderErr);
+        canvas = await toCanvas(tableContainer, { ...options, skipFonts: true });
+      }
 
-        // Completely remove all manage column elements from the cloned DOM
-        clonedDoc
-          .querySelectorAll('.manage-col, [data-col="manage"], [data-html2canvas-ignore="true"]')
-          .forEach((el) => {
-            el.remove();
-          });
-      },
-    });
+      // 4. Validate canvas dimensions (guard against blank/zero-sized rendering)
+      if (!canvas || canvas.width < 100 || canvas.height < 100) {
+        throw new Error('생성된 배정표 이미지가 비어 있거나 크기가 비정상적입니다.');
+      }
 
-    return canvas;
+      // 5. Convert to high-quality PNG data URL
+      const dataUrl = canvas.toDataURL('image/png');
+      if (!dataUrl || dataUrl.length < 1000) {
+        throw new Error('배정표 이미지 데이터 추출에 실패했습니다.');
+      }
+
+      return dataUrl;
+    } finally {
+      // 6. Always remove capturing mode class so the live UI returns to normal
+      tableContainer.classList.remove('is-capturing');
+    }
   };
 
   // Handler: High Quality PNG Image File Download
@@ -599,20 +607,27 @@ export default function App() {
     try {
       setIsCapturing(true);
 
-      const canvas = await generateSheetCanvas();
-      if (!canvas) {
+      const dataUrl = await generateSheetPng();
+      if (!dataUrl) {
         showToast('배정표 영역을 찾을 수 없습니다.');
         return;
       }
 
+      setPreviewImageDataUrl(dataUrl);
       const dateName = (activeSession.dateKey || '배정표').replace(/[^0-9-]/g, '');
-      const fileName = `누비밴드_파트배분_${dateName || activeSession.dateStr}.png`;
+      const fileName = `누비밴드_합주배정표_${dateName || activeSession.dateStr}.png`;
 
-      const dataUrl = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = fileName;
-      link.click();
+      // Trigger direct download
+      try {
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (dlErr) {
+        console.warn('Direct download skipped:', dlErr);
+      }
 
       confetti({
         particleCount: 50,
@@ -620,7 +635,9 @@ export default function App() {
         origin: { y: 0.8 },
       });
 
-      showToast(`📷 ${fileName} 저장 완료!`);
+      // Show preview modal so mobile users can long-press to save or share
+      setIsPreviewModalOpen(true);
+      showToast(`📷 배정표 이미지가 생성되었습니다.`);
     } catch (err) {
       console.error('Image capture error', err);
       showToast('이미지 저장 중 오류가 발생했습니다.');
@@ -634,46 +651,36 @@ export default function App() {
     try {
       setIsCopyingImage(true);
 
-      const canvas = await generateSheetCanvas();
-      if (!canvas) {
+      const dataUrl = await generateSheetPng();
+      if (!dataUrl) {
         showToast('배정표 영역을 찾을 수 없습니다.');
         return;
       }
 
-      const dateName = (activeSession.dateKey || '배정표').replace(/[^0-9-]/g, '');
-      const fileName = `누비밴드_파트배분_${dateName || activeSession.dateStr}.png`;
+      setPreviewImageDataUrl(dataUrl);
 
-      canvas.toBlob(async (blob) => {
+      let clipboardSuccess = false;
+      if (navigator.clipboard && typeof window.ClipboardItem !== 'undefined') {
         try {
-          if (!blob) {
-            throw new Error('이미지 Blob 생성 실패');
-          }
-
-          if (navigator.clipboard && typeof window.ClipboardItem !== 'undefined') {
-            const item = new ClipboardItem({ 'image/png': blob });
-            await navigator.clipboard.write([item]);
-            showToast('📋 이미지가 클립보드에 복사되었습니다! 카톡에 바로 Ctrl+V 하세요.');
-          } else {
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = fileName;
-            link.click();
-            showToast('클립보드 직접 복사를 미지원하는 브라우저로 이미지 파일이 다운로드되었습니다.');
-          }
+          const blob = dataUrlToBlob(dataUrl);
+          const item = new ClipboardItem({ 'image/png': blob });
+          await navigator.clipboard.write([item]);
+          clipboardSuccess = true;
+          showToast('📋 이미지가 클립보드에 복사되었습니다! 카톡에 바로 Ctrl+V 하세요.');
         } catch (clipErr) {
-          console.warn('Clipboard write fallback to download:', clipErr);
-          const link = document.createElement('a');
-          link.href = canvas.toDataURL('image/png');
-          link.download = fileName;
-          link.click();
-          showToast('클립보드 접근 제한으로 이미지 파일이 다운로드되었습니다.');
-        } finally {
-          setIsCopyingImage(false);
+          console.warn('Clipboard write restricted:', clipErr);
         }
-      }, 'image/png');
+      }
+
+      // If clipboard write failed or was blocked by browser permissions, open ImagePreviewModal
+      if (!clipboardSuccess) {
+        setIsPreviewModalOpen(true);
+        showToast('클립보드 접근이 제한되어 이미지 미리보기 창을 띄웠습니다.');
+      }
     } catch (err) {
       console.error('Image clipboard copy error', err);
       showToast('클립보드 이미지 복사 실패: 브라우저 권한을 확인해주세요.');
+    } finally {
       setIsCopyingImage(false);
     }
   };
@@ -784,6 +791,29 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Capture / Loading Indicator Overlay */}
+      {(isCapturing || isCopyingImage) && (
+        <div className="fixed inset-0 z-70 flex flex-col items-center justify-center bg-black/45 backdrop-blur-xs select-none animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl px-6 py-5 shadow-2xl border border-gray-200 flex flex-col items-center gap-3">
+            <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+            <div className="text-center">
+              <p className="text-sm font-bold text-gray-900">배정표 이미지 생성 중...</p>
+              <p className="text-xs text-gray-500 mt-0.5">고화질 표 이미지를 변환하고 있습니다.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Preview & Mobile Sharing Modal */}
+      <ImagePreviewModal
+        isOpen={isPreviewModalOpen}
+        onClose={() => setIsPreviewModalOpen(false)}
+        imageDataUrl={previewImageDataUrl}
+        fileName={`누비밴드_합주배정표_${(activeSession.dateKey || '배정표').replace(/[^0-9-]/g, '') || activeSession.dateStr}.png`}
+        dateLabel={formatSessionDateWithDay(activeSession.dateStr, activeSession.dateKey)}
+        onShowToast={showToast}
+      />
 
       {/* Toast Notification */}
       {toastMessage && (

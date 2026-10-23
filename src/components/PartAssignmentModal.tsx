@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, UserPlus, Plus, Edit2, Check } from 'lucide-react';
 import { RehearsalSession, PartType } from '../types';
 import { PART_LABELS } from '../utils/sheetUtils';
@@ -40,11 +40,24 @@ export const PartAssignmentModal: React.FC<PartAssignmentModalProps> = ({
   const [selectedPart, setSelectedPart] = useState<PartType>(initialPart);
   const [memberName, setMemberName] = useState<string>('');
 
+  // Scroll container ref to ensure modal always starts from the top
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
   // Quick members state synced via Firestore & localStorage
   const [quickMembers, setQuickMembers] = useState<string[]>(() => loadLocalMembers());
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [memberToDelete, setMemberToDelete] = useState<string | null>(null);
   const [toastNotice, setToastNotice] = useState<string | null>(null);
+
+  // Prevent background table scroll while modal is open
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
 
   // Real-time synchronization of quick members from Firestore
   useEffect(() => {
@@ -70,6 +83,11 @@ export const PartAssignmentModal: React.FC<PartAssignmentModalProps> = ({
       setIsEditMode(false);
       setMemberToDelete(null);
       setToastNotice(null);
+
+      // Ensure modal is scrolled to the top so header & song/part selection are visible
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = 0;
+      }
     }
   }, [isOpen, initialSongId, initialPart]);
 
@@ -182,6 +200,7 @@ export const PartAssignmentModal: React.FC<PartAssignmentModalProps> = ({
 
         {/* 2. Modal Body (Scrolls vertically on mobile/overflow) */}
         <div
+          ref={scrollContainerRef}
           className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 overscroll-contain touch-pan-y"
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
@@ -251,8 +270,8 @@ export const PartAssignmentModal: React.FC<PartAssignmentModalProps> = ({
                   value={memberName}
                   onChange={(e) => setMemberName(e.target.value)}
                   placeholder="예: 홍길동..."
-                  className="flex-1 text-xs py-2 px-3 border border-[#dadce0] rounded-lg text-[#202124] focus:outline-none focus:border-blue-500"
-                  autoFocus
+                  style={{ width: '140px' }}
+                  className="w-[140px] text-[16px] sm:text-xs py-2 px-3 border border-[#dadce0] rounded-lg text-[#202124] focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="button"

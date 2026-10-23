@@ -120,6 +120,7 @@ export const SheetTable: React.FC<SheetTableProps> = ({
       {/* Printable / Capturable Clean White Card */}
       <div
         id="sheet-table-capture-area"
+        data-capture-target="true"
         className="bg-white border-y sm:border border-gray-200 sm:rounded-xl shadow-xs p-0 sm:p-5 w-full"
       >
         <div className="overflow-x-auto relative scrollbar-thin scrollbar-thumb-gray-300">

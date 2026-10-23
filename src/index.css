@@ -1,1 +1,36 @@
 @import "tailwindcss";
+
+/* 캡처 모드: 캡처 시 실제 DOM 요소에 임시 적용되어 전체 너비 확장 및 관리 열 숨김 처리 */
+.is-capturing {
+  overflow: visible !important;
+  width: max-content !important;
+  min-width: 1050px !important;
+  background-color: #ffffff !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.is-capturing .overflow-x-auto,
+.is-capturing [class*="overflow-x"] {
+  overflow: visible !important;
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.is-capturing table {
+  width: 100% !important;
+  min-width: 1050px !important;
+  table-layout: auto !important;
+}
+
+.is-capturing .manage-col,
+.is-capturing [data-col="manage"],
+.is-capturing [data-html2canvas-ignore="true"] {
+  display: none !important;
+}
+
+.is-capturing .sticky,
+.is-capturing [class*="sticky"] {
+  position: static !important;
+  box-shadow: none !important;
+}
