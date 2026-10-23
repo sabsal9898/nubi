@@ -1,15 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import {
-  initializeFirestore,
-  getFirestore,
-  Firestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  doc,
-  getDocFromServer,
-} from 'firebase/firestore';
+import { getFirestore, Firestore } from 'firebase/firestore';
 
-// Your web app's Firebase configuration
+// Explicit Firebase client configuration for supple-glyph-sn50x
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAuHtv0bs1Fjnt1-DZlTM-DsQzzaJjmXLk",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "supple-glyph-sn50x.firebaseapp.com",
@@ -22,35 +14,16 @@ const firebaseConfig = {
 // Initialize Firebase App
 const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firestore with persistent offline cache and multi-tab support
-let dbInstance: Firestore;
-try {
-  dbInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-    }),
-  });
-} catch {
-  // If initializeFirestore fails (e.g. already initialized or unsupported environment), fallback to getFirestore
-  dbInstance = getFirestore(app);
-}
+// Explicit Named Database ID for this application
+export const FIRESTORE_DATABASE_ID = 'ai-studio-nubiband-af82b33c-6acd-4568-ac73-9f9ff6b594be';
 
-export const db: Firestore = dbInstance;
+// Initialize Firestore directly with the Named Database ID
+export const db: Firestore = getFirestore(app, FIRESTORE_DATABASE_ID);
 
 // Validates whether Firebase is configured
 export const isFirebaseConfigured = Boolean(
-  firebaseConfig.apiKey &&
-  firebaseConfig.projectId &&
-  firebaseConfig.projectId === 'supple-glyph-sn50x'
+  firebaseConfig.apiKey && firebaseConfig.projectId
 );
 
 export { app, firebaseConfig };
 
-// Validate connection
-if (isFirebaseConfigured && typeof window !== 'undefined') {
-  getDocFromServer(doc(db, 'test', 'connection')).catch((error) => {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase client is offline, working with local cache.');
-    }
-  });
-}

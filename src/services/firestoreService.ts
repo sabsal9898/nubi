@@ -22,7 +22,6 @@ const BAND_MEMBERS_DOC = 'band_members';
 export const LOCAL_STORAGE_KEY = 'nubi_band_data';
 const LEGACY_LOCAL_STORAGE_KEY = 'noobi_band_sessions_v1';
 export const STORAGE_MEMBERS_KEY = 'nubi_band_members';
-const DELETED_SESSIONS_KEY = 'nubi_band_deleted_session_ids';
 
 export enum OperationType {
   CREATE = 'create',
@@ -69,7 +68,7 @@ export function handleFirestoreError(
 // Data Model Normalizers & Sanitizers
 // ==========================================
 
-function toCleanStringArray(val: unknown): string[] {
+export function toCleanStringArray(val: unknown): string[] {
   if (Array.isArray(val)) {
     return val
       .filter((item): item is string => typeof item === 'string')
@@ -192,6 +191,42 @@ export function normalizeSession(raw: any, fallbackId?: string): RehearsalSessio
 }
 
 /**
+ * Sanitizes a song object for Firestore storage
+ */
+export function sanitizeSongForFirestore(s: Song) {
+  const vocal = toCleanStringArray(s.vocal);
+  const guitar1 = toCleanStringArray(s.guitar1);
+  const guitar2 = toCleanStringArray(s.guitar2);
+  const bass = toCleanStringArray(s.bass);
+  const drum = toCleanStringArray(s.drum);
+  const keyboard = toCleanStringArray(s.keyboard);
+  const notes = typeof s.notes === 'string' ? s.notes : '';
+
+  return {
+    id: s.id,
+    title: s.title || '',
+    artist: s.artist || '',
+    notes,
+    vocal,
+    guitar1,
+    guitar2,
+    bass,
+    drum,
+    keyboard,
+    parts: {
+      vocal,
+      guitar1,
+      guitar2,
+      leadGuitar: guitar1,
+      rhythmGuitar: guitar2,
+      bass,
+      drum,
+      keyboard,
+    },
+  };
+}
+
+/**
  * Prepares a session document for Firestore (no undefined values, dual-compatible parts)
  */
 export function sanitizeSessionForFirestore(session: RehearsalSession) {
@@ -202,35 +237,14 @@ export function sanitizeSessionForFirestore(session: RehearsalSession) {
     dateKey: norm.dateKey,
     date: norm.dateStr,
     sheetTitle: norm.sheetTitle,
-    createdAt: norm.createdAt,
+    createdAt: norm.createdAt || Date.now(),
     updatedAt: norm.updatedAt || Date.now(),
-    songs: norm.songs.map((s) => ({
-      id: s.id,
-      title: s.title,
-      artist: s.artist,
-      vocal: s.vocal,
-      guitar1: s.guitar1,
-      guitar2: s.guitar2,
-      bass: s.bass,
-      drum: s.drum,
-      keyboard: s.keyboard,
-      notes: s.notes,
-      parts: {
-        vocal: s.vocal,
-        guitar1: s.guitar1,
-        guitar2: s.guitar2,
-        leadGuitar: s.guitar1,
-        rhythmGuitar: s.guitar2,
-        bass: s.bass,
-        drum: s.drum,
-        keyboard: s.keyboard,
-      },
-    })),
+    songs: norm.songs.map((s) => sanitizeSongForFirestore(s)),
   };
 }
 
 // ==========================================
-// Local Storage Helpers
+// Local Storage Cache Helpers (Passive Fallback)
 // ==========================================
 
 export function loadLocalSessions(): RehearsalSession[] {
@@ -239,22 +253,15 @@ export function loadLocalSessions(): RehearsalSession[] {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const normalized = parsed.map((s) => normalizeSession(s));
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(normalized));
-        return sortSessionsDescending(normalized);
+        return sortSessionsDescending(parsed.map((s) => normalizeSession(s)));
       }
     }
   } catch (e) {
     console.warn('Failed to parse sessions from localStorage:', e);
   }
 
-  // Fallback only when localStorage is completely empty
+  // Fallback if no local cache exists
   const defaultSessions = INITIAL_SESSIONS.map((s) => normalizeSession(s));
-  try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(defaultSessions));
-  } catch {
-    // ignore
-  }
   return sortSessionsDescending(defaultSessions);
 }
 
@@ -290,106 +297,28 @@ export function saveLocalMembers(members: string[]): void {
   }
 }
 
-function getDeletedSessionIds(): Set<string> {
-  try {
-    const saved = localStorage.getItem(DELETED_SESSIONS_KEY);
-    if (saved) {
-      const arr = JSON.parse(saved);
-      if (Array.isArray(arr)) return new Set(arr);
-    }
-  } catch {
-    // ignore
-  }
-  return new Set();
-}
-
-function recordDeletedSessionId(id: string) {
-  try {
-    const set = getDeletedSessionIds();
-    set.add(id);
-    localStorage.setItem(DELETED_SESSIONS_KEY, JSON.stringify(Array.from(set)));
-  } catch {
-    // ignore
-  }
-}
-
-function removeDeletedSessionId(id: string) {
-  try {
-    const set = getDeletedSessionIds();
-    set.delete(id);
-    localStorage.setItem(DELETED_SESSIONS_KEY, JSON.stringify(Array.from(set)));
-  } catch {
-    // ignore
-  }
-}
-
-function updateSingleLocalSession(session: RehearsalSession): RehearsalSession {
-  const norm = normalizeSession(session);
-  norm.updatedAt = Date.now();
-  try {
-    const list = loadLocalSessions();
-    const existingIdx = list.findIndex((s) => s.id === norm.id);
-    let updated: RehearsalSession[];
-    if (existingIdx >= 0) {
-      updated = list.map((s) => (s.id === norm.id ? norm : s));
-    } else {
-      updated = [norm, ...list];
-    }
-    saveAllLocalSessions(updated);
-  } catch (e) {
-    console.warn('Failed to update single local session:', e);
-  }
-  return norm;
-}
-
-function mutateLocalSession(
-  sessionId: string,
-  mutator: (s: RehearsalSession) => RehearsalSession
-): RehearsalSession | null {
-  try {
-    const list = loadLocalSessions();
-    const target = list.find((s) => s.id === sessionId);
-    if (target) {
-      const updatedTarget = normalizeSession({
-        ...mutator(target),
-        updatedAt: Date.now(),
-      });
-      const updatedList = list.map((s) => (s.id === sessionId ? updatedTarget : s));
-      saveAllLocalSessions(updatedList);
-      return updatedTarget;
-    }
-  } catch (e) {
-    console.warn('Failed to mutate local session:', e);
-  }
-  return null;
-}
-
-function deleteLocalSession(sessionId: string) {
-  try {
-    const list = loadLocalSessions();
-    const filtered = list.filter((s) => s.id !== sessionId);
-    saveAllLocalSessions(filtered);
-  } catch (e) {
-    console.warn('Failed to delete local session:', e);
-  }
-}
-
 // ==========================================
-// Real-time Subscriptions (onSnapshot with Protection Guard)
+// Real-time Subscriptions (Single Source of Truth)
 // ==========================================
 
 /**
  * Subscribes to real-time changes in Rehearsal Sessions.
- * Emits updated sessions immediately on change across all devices.
- * Safeguards against overwriting user's local songs with empty/outdated Firestore data.
+ * Emits updated sessions immediately on change across all devices (PC, Mobile).
+ * Firestore snapshot is the absolute Single Source of Truth; local storage never overwrites remote data.
  */
 export function subscribeToRehearsalSessions(
   onUpdate: (sessions: RehearsalSession[]) => void,
   onError?: (err: Error) => void
 ): () => void {
-  // 1. Immediately provide locally cached sessions (fastest first-paint)
-  const initialLocal = loadLocalSessions();
-  onUpdate(initialLocal);
+  // 1. Initial immediate paint from local cache for fast loading
+  try {
+    const initialLocal = loadLocalSessions();
+    if (initialLocal.length > 0) {
+      onUpdate(initialLocal);
+    }
+  } catch {
+    // ignore
+  }
 
   // 2. Real-time Firestore sync
   if (isFirebaseConfigured && db) {
@@ -400,20 +329,15 @@ export function subscribeToRehearsalSessions(
       const unsubscribe = onSnapshot(
         q,
         async (snapshot) => {
-          const deletedIds = getDeletedSessionIds();
-          const currentLocal = loadLocalSessions();
-
-          // If Firestore collection is empty, seed it with the current local sessions
+          // If Firestore collection is completely empty, initialize it with the default session once
           if (snapshot.empty) {
             try {
-              for (const s of currentLocal) {
-                if (!deletedIds.has(s.id)) {
-                  await setDoc(
-                    doc(db!, SESSIONS_COLLECTION, s.id),
-                    sanitizeSessionForFirestore(s),
-                    { merge: true }
-                  );
-                }
+              for (const s of INITIAL_SESSIONS) {
+                const norm = normalizeSession(s);
+                await setDoc(
+                  doc(db!, SESSIONS_COLLECTION, norm.id),
+                  sanitizeSessionForFirestore(norm)
+                );
               }
             } catch (seedErr) {
               handleFirestoreError(seedErr, OperationType.WRITE, SESSIONS_COLLECTION);
@@ -421,88 +345,22 @@ export function subscribeToRehearsalSessions(
             return;
           }
 
+          // Snapshot has documents: Firestore is the absolute truth!
           const remoteSessions: RehearsalSession[] = [];
           snapshot.forEach((docSnap) => {
             const data = docSnap.data();
-            const sessionId = docSnap.id;
-            if (!deletedIds.has(sessionId)) {
-              remoteSessions.push(normalizeSession(data, sessionId));
-            }
+            remoteSessions.push(normalizeSession(data, docSnap.id));
           });
 
-          // Smart Merge with Safety Guard:
-          // Local sessions that have songs must NEVER be overwritten by empty or older remote sessions!
-          const sessionMap = new Map<string, RehearsalSession>();
-          const sessionsToPushToRemote: RehearsalSession[] = [];
-
-          const remoteMap = new Map<string, RehearsalSession>();
-          for (const r of remoteSessions) {
-            remoteMap.set(r.id, r);
-          }
-
-          // 1. Evaluate all current local sessions
-          for (const local of currentLocal) {
-            if (deletedIds.has(local.id)) continue;
-
-            const remote = remoteMap.get(local.id);
-            if (!remote) {
-              // Local session not yet in remote -> keep local & schedule sync to remote
-              sessionMap.set(local.id, local);
-              sessionsToPushToRemote.push(local);
-            } else {
-              const localSongCount = local.songs?.length || 0;
-              const remoteSongCount = remote.songs?.length || 0;
-              const localUpdatedAt = local.updatedAt || local.createdAt || 0;
-              const remoteUpdatedAt = remote.updatedAt || remote.createdAt || 0;
-
-              // Rule A: Local has songs, remote is empty -> Preserve local and repair remote
-              if (localSongCount > 0 && remoteSongCount === 0) {
-                sessionMap.set(local.id, local);
-                sessionsToPushToRemote.push(local);
-              }
-              // Rule B: Local has newer timestamp -> Preserve local and update remote
-              else if (localUpdatedAt > remoteUpdatedAt) {
-                sessionMap.set(local.id, local);
-                sessionsToPushToRemote.push(local);
-              }
-              // Rule C: Remote is newer or equal -> Accept remote
-              else {
-                sessionMap.set(remote.id, remote);
-              }
-            }
-          }
-
-          // 2. Add any remote sessions that were not in local yet (created by other members)
-          for (const remote of remoteSessions) {
-            if (!sessionMap.has(remote.id)) {
-              sessionMap.set(remote.id, remote);
-            }
-          }
-
-          const merged = sortSessionsDescending(Array.from(sessionMap.values()));
-          if (merged.length > 0) {
-            saveAllLocalSessions(merged);
-            onUpdate(merged);
-          }
-
-          // Background auto-repair: push any uncommitted local sessions/songs to remote
-          if (sessionsToPushToRemote.length > 0) {
-            for (const s of sessionsToPushToRemote) {
-              setDoc(
-                doc(db!, SESSIONS_COLLECTION, s.id),
-                sanitizeSessionForFirestore(s),
-                { merge: true }
-              ).catch((e) => {
-                console.warn('Auto-repair sync skipped:', e);
-              });
-            }
-          }
+          const sorted = sortSessionsDescending(remoteSessions);
+          saveAllLocalSessions(sorted);
+          onUpdate(sorted);
         },
         (error) => {
           handleFirestoreError(error, OperationType.LIST, SESSIONS_COLLECTION);
           onError?.(error);
-          const local = loadLocalSessions();
-          onUpdate(local);
+          const fallback = loadLocalSessions();
+          onUpdate(fallback);
         }
       );
 
@@ -512,7 +370,7 @@ export function subscribeToRehearsalSessions(
     }
   }
 
-  // Cross-tab storage fallback
+  // Fallback for cross-tab storage changes if Firestore unavailable
   const handleStorageChange = (e: StorageEvent) => {
     if ((e.key === LOCAL_STORAGE_KEY || e.key === LEGACY_LOCAL_STORAGE_KEY) && e.newValue) {
       try {
@@ -537,7 +395,7 @@ export function subscribeToBandMembers(
   onUpdate: (members: string[]) => void,
   onError?: (err: Error) => void
 ): () => void {
-  // 1. Immediately provide local cache
+  // 1. Initial paint from local cache
   const localMembers = loadLocalMembers();
   onUpdate(localMembers);
 
@@ -551,8 +409,7 @@ export function subscribeToBandMembers(
         async (snap) => {
           if (!snap.exists()) {
             try {
-              const current = loadLocalMembers();
-              await setDoc(docRef, { members: current });
+              await setDoc(docRef, { members: KNOWN_MEMBERS });
             } catch (seedErr) {
               handleFirestoreError(seedErr, OperationType.WRITE, `${SETTINGS_COLLECTION}/${BAND_MEMBERS_DOC}`);
             }
@@ -580,7 +437,7 @@ export function subscribeToBandMembers(
     }
   }
 
-  // Fallback: listen for cross-tab storage changes
+  // Cross-tab storage fallback
   const handleStorageChange = (e: StorageEvent) => {
     if (e.key === STORAGE_MEMBERS_KEY && e.newValue) {
       try {
@@ -599,17 +456,15 @@ export function subscribeToBandMembers(
 }
 
 // ==========================================
-// Atomic Session Operations & Write-Through
+// Atomic Session Operations (Direct Firestore)
 // ==========================================
 
 /**
- * Creates or updates an entire session document (Write-Through: LocalStorage + Firestore setDoc)
+ * Creates or updates an entire session document in Firestore.
  */
 export async function saveSession(session: RehearsalSession): Promise<void> {
   const norm = normalizeSession(session);
   norm.updatedAt = Date.now();
-  removeDeletedSessionId(norm.id);
-  updateSingleLocalSession(norm);
 
   if (isFirebaseConfigured && db) {
     try {
@@ -622,12 +477,9 @@ export async function saveSession(session: RehearsalSession): Promise<void> {
 }
 
 /**
- * Deletes a rehearsal session document by ID.
+ * Deletes a rehearsal session document by ID from Firestore.
  */
 export async function removeSession(sessionId: string): Promise<void> {
-  recordDeletedSessionId(sessionId);
-  deleteLocalSession(sessionId);
-
   if (isFirebaseConfigured && db) {
     try {
       const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
@@ -639,26 +491,13 @@ export async function removeSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Atomically adds a song to a session.
- * Write-Through: updates localStorage immediately, writes via setDoc, and attempts atomic transaction.
+ * Atomically adds a song to a session in Firestore using a transaction.
  */
 export async function atomicAddSong(sessionId: string, newSong: Song): Promise<void> {
   const cleanSong = normalizeSong(newSong);
-  const updatedSession = mutateLocalSession(sessionId, (s) => ({
-    ...s,
-    songs: [cleanSong, ...s.songs.filter((song) => song.id !== cleanSong.id)],
-  }));
 
-  if (isFirebaseConfigured && db && updatedSession) {
+  if (isFirebaseConfigured && db) {
     const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
-    // Write-Through setDoc guarantees offline persistence & immediate sync
-    try {
-      await setDoc(sessionRef, sanitizeSessionForFirestore(updatedSession), { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
-    }
-
-    // Secondary atomic transaction check for active multi-user concurrency
     try {
       await runTransaction(db, async (transaction) => {
         const sessionSnap = await transaction.get(sessionRef);
@@ -668,33 +507,37 @@ export async function atomicAddSong(sessionId: string, newSong: Song): Promise<v
         const filtered = currentSongs.filter((song) => song.id !== cleanSong.id);
         const updatedSongs = [cleanSong, ...filtered];
         transaction.update(sessionRef, {
-          songs: updatedSongs.map((s) => normalizeSong(s)),
+          songs: updatedSongs.map((s) => sanitizeSongForFirestore(s)),
           updatedAt: Date.now(),
         });
       });
-    } catch {
-      // Transaction optional if setDoc succeeded
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
+      // Fallback: direct setDoc if transaction conflicted
+      try {
+        const localSessions = loadLocalSessions();
+        const cur = localSessions.find((s) => s.id === sessionId);
+        if (cur) {
+          const updated = {
+            ...cur,
+            songs: [cleanSong, ...cur.songs.filter((s) => s.id !== cleanSong.id)],
+            updatedAt: Date.now(),
+          };
+          await setDoc(sessionRef, sanitizeSessionForFirestore(updated), { merge: true });
+        }
+      } catch (fallbackErr) {
+        console.warn('Fallback setDoc error:', fallbackErr);
+      }
     }
   }
 }
 
 /**
- * Atomically deletes a song from a session.
+ * Atomically deletes a song from a session in Firestore using a transaction.
  */
 export async function atomicDeleteSong(sessionId: string, songId: string): Promise<void> {
-  const updatedSession = mutateLocalSession(sessionId, (s) => ({
-    ...s,
-    songs: s.songs.filter((song) => song.id !== songId),
-  }));
-
-  if (isFirebaseConfigured && db && updatedSession) {
+  if (isFirebaseConfigured && db) {
     const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
-    try {
-      await setDoc(sessionRef, sanitizeSessionForFirestore(updatedSession), { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
-    }
-
     try {
       await runTransaction(db, async (transaction) => {
         const sessionSnap = await transaction.get(sessionRef);
@@ -703,39 +546,26 @@ export async function atomicDeleteSong(sessionId: string, songId: string): Promi
         const currentSongs = Array.isArray(data.songs) ? data.songs.map((s: any) => normalizeSong(s)) : [];
         const updatedSongs = currentSongs.filter((s) => s.id !== songId);
         transaction.update(sessionRef, {
-          songs: updatedSongs.map((s) => normalizeSong(s)),
+          songs: updatedSongs.map((s) => sanitizeSongForFirestore(s)),
           updatedAt: Date.now(),
         });
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
     }
   }
 }
 
 /**
- * Atomically updates title, artist, or notes for a specific song.
+ * Atomically updates title, artist, or notes for a specific song in Firestore.
  */
 export async function atomicUpdateSongInfo(
   sessionId: string,
   songId: string,
   updates: { title?: string; artist?: string; notes?: string }
 ): Promise<void> {
-  const updatedSession = mutateLocalSession(sessionId, (s) => ({
-    ...s,
-    songs: s.songs.map((song) =>
-      song.id === songId ? normalizeSong({ ...song, ...updates }) : song
-    ),
-  }));
-
-  if (isFirebaseConfigured && db && updatedSession) {
+  if (isFirebaseConfigured && db) {
     const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
-    try {
-      await setDoc(sessionRef, sanitizeSessionForFirestore(updatedSession), { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
-    }
-
     try {
       await runTransaction(db, async (transaction) => {
         const sessionSnap = await transaction.get(sessionRef);
@@ -746,18 +576,18 @@ export async function atomicUpdateSongInfo(
           song.id === songId ? normalizeSong({ ...song, ...updates }) : song
         );
         transaction.update(sessionRef, {
-          songs: updatedSongs.map((s) => normalizeSong(s)),
+          songs: updatedSongs.map((s) => sanitizeSongForFirestore(s)),
           updatedAt: Date.now(),
         });
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
     }
   }
 }
 
 /**
- * Atomically assigns a member to a part in a song.
+ * Atomically assigns a member to a part in a song in Firestore.
  */
 export async function atomicAssignMember(
   sessionId: string,
@@ -773,27 +603,8 @@ export async function atomicAssignMember(
   const trimmed = memberName.trim();
   if (!trimmed) return;
 
-  const updatedSession = mutateLocalSession(sessionId, (s) => ({
-    ...s,
-    songs: s.songs.map((song) => {
-      if (song.id === songId) {
-        const currentList = song[part] || [];
-        if (!currentList.includes(trimmed)) {
-          return normalizeSong({ ...song, [part]: [...currentList, trimmed] });
-        }
-      }
-      return song;
-    }),
-  }));
-
-  if (isFirebaseConfigured && db && updatedSession) {
+  if (isFirebaseConfigured && db) {
     const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
-    try {
-      await setDoc(sessionRef, sanitizeSessionForFirestore(updatedSession), { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
-    }
-
     try {
       await runTransaction(db, async (transaction) => {
         const sessionSnap = await transaction.get(sessionRef);
@@ -810,18 +621,18 @@ export async function atomicAssignMember(
           return song;
         });
         transaction.update(sessionRef, {
-          songs: updatedSongs.map((s) => normalizeSong(s)),
+          songs: updatedSongs.map((s) => sanitizeSongForFirestore(s)),
           updatedAt: Date.now(),
         });
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
     }
   }
 }
 
 /**
- * Atomically removes a member from a part in a song.
+ * Atomically removes a member from a part in a song in Firestore.
  */
 export async function atomicRemoveMember(
   sessionId: string,
@@ -832,27 +643,9 @@ export async function atomicRemoveMember(
   if (part === 'notes') return;
 
   const trimmed = memberName.trim();
-  const updatedSession = mutateLocalSession(sessionId, (s) => ({
-    ...s,
-    songs: s.songs.map((song) => {
-      if (song.id === songId) {
-        return normalizeSong({
-          ...song,
-          [part]: (song[part] || []).filter((m) => m !== trimmed),
-        });
-      }
-      return song;
-    }),
-  }));
 
-  if (isFirebaseConfigured && db && updatedSession) {
+  if (isFirebaseConfigured && db) {
     const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
-    try {
-      await setDoc(sessionRef, sanitizeSessionForFirestore(updatedSession), { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
-    }
-
     try {
       await runTransaction(db, async (transaction) => {
         const sessionSnap = await transaction.get(sessionRef);
@@ -863,24 +656,24 @@ export async function atomicRemoveMember(
           if (song.id === songId) {
             return normalizeSong({
               ...song,
-              [part]: (song[part] || []).filter((m) => m !== trimmed),
+              [part]: (song[part] || []).filter((m: string) => m !== trimmed),
             });
           }
           return song;
         });
         transaction.update(sessionRef, {
-          songs: updatedSongs.map((s) => normalizeSong(s)),
+          songs: updatedSongs.map((s) => sanitizeSongForFirestore(s)),
           updatedAt: Date.now(),
         });
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
     }
   }
 }
 
 /**
- * Atomically replaces all members for a part in a song.
+ * Atomically replaces all members for a part in a song in Firestore.
  */
 export async function atomicUpdateSongPartMembers(
   sessionId: string,
@@ -891,24 +684,9 @@ export async function atomicUpdateSongPartMembers(
   if (part === 'notes') return;
 
   const cleanMembers = toCleanStringArray(members);
-  const updatedSession = mutateLocalSession(sessionId, (s) => ({
-    ...s,
-    songs: s.songs.map((song) => {
-      if (song.id === songId) {
-        return normalizeSong({ ...song, [part]: cleanMembers });
-      }
-      return song;
-    }),
-  }));
 
-  if (isFirebaseConfigured && db && updatedSession) {
+  if (isFirebaseConfigured && db) {
     const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
-    try {
-      await setDoc(sessionRef, sanitizeSessionForFirestore(updatedSession), { merge: true });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
-    }
-
     try {
       await runTransaction(db, async (transaction) => {
         const sessionSnap = await transaction.get(sessionRef);
@@ -922,12 +700,12 @@ export async function atomicUpdateSongPartMembers(
           return song;
         });
         transaction.update(sessionRef, {
-          songs: updatedSongs.map((s) => normalizeSong(s)),
+          songs: updatedSongs.map((s) => sanitizeSongForFirestore(s)),
           updatedAt: Date.now(),
         });
       });
-    } catch {
-      // ignore
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
     }
   }
 }
