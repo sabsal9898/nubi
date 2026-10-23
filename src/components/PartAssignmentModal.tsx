@@ -167,7 +167,7 @@ export const PartAssignmentModal: React.FC<PartAssignmentModalProps> = ({
             <div>
               <h3 className="font-semibold text-sm text-[#202124]">파트 선택 / 신청</h3>
               <p className="text-[11px] text-[#5f6368]">
-                곡과 희망 파트를 선택하고 이름을 등록하세요. (한 파트 다중 인원 지원)
+                곡과 희망 파트를 선택하고 이름을 등록하세요.
               </p>
             </div>
           </div>
@@ -275,7 +275,7 @@ export const PartAssignmentModal: React.FC<PartAssignmentModalProps> = ({
                   className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold rounded-lg flex items-center gap-1 shadow-xs transition shrink-0 cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
-                  <span>배정/추가</span>
+                  <span>입력</span>
                 </button>
               </div>
 

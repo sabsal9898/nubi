@@ -115,7 +115,7 @@ export const EditSongModal: React.FC<EditSongModalProps> = ({
           </div>
 
           <div className="bg-blue-50/60 border border-blue-100 rounded-lg p-2.5 text-[11px] text-blue-800 leading-relaxed">
-            <span className="font-semibold">안내:</span> 곡명이나 아티스트 정보를 수정하더라도 이미 배정된 보컬, 기타, 베이스, 드럼, 건반 멤버 목록은 유실되지 않고 안전하게 보존됩니다.
+            <span className="font-semibold">안내:</span> 곡명이나 아티스트 정보를 수정하더라도 이미 배정된 파트 멤버 목록은 유실되지 않고 안전하게 보존됩니다.
           </div>
 
           {/* Modal Footer */}
