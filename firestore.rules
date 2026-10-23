@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Rehearsal sessions collection rules for band members
+    match /rehearsal_sessions/{sessionId} {
+      allow read, write: if true;
+    }
+  }
+}
