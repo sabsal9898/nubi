@@ -96,30 +96,71 @@ export function formatSessionDateWithDay(
 }
 
 /**
- * Parses date string (e.g. "2026-11-26", "2026년 11월 26일") to comparable timestamp
+ * Parses date string or ID to a comparable millisecond timestamp.
+ * Supports dateKey, dateRaw, dateStr, date, ID containing YYYY-MM-DD, or createdAt.
  */
 export function getSessionDateTimestamp(session: RehearsalSession): number {
-  if (session.dateKey) {
-    const t = Date.parse(session.dateKey);
+  if (!session) return 0;
+
+  // 1. Check dateKey or dateRaw (e.g. "2026-12-24", "2026.12.24")
+  const rawKey = (session.dateKey || (session as any).dateRaw || '').trim();
+  if (rawKey) {
+    const isoMatch = rawKey.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (isoMatch) {
+      return new Date(
+        parseInt(isoMatch[1], 10),
+        parseInt(isoMatch[2], 10) - 1,
+        parseInt(isoMatch[3], 10)
+      ).getTime();
+    }
+    const t = Date.parse(rawKey);
     if (!isNaN(t)) return t;
   }
-  const match = session.dateStr?.match(/(\d{4})[^\d]+(\d{1,2})[^\d]+(\d{1,2})/);
-  if (match) {
-    return new Date(
-      parseInt(match[1], 10),
-      parseInt(match[2], 10) - 1,
-      parseInt(match[3], 10)
-    ).getTime();
+
+  // 2. Check id if it contains a date pattern like "2026-12-24" or "session-2026-12-24"
+  if (session.id) {
+    const idMatch = session.id.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (idMatch) {
+      return new Date(
+        parseInt(idMatch[1], 10),
+        parseInt(idMatch[2], 10) - 1,
+        parseInt(idMatch[3], 10)
+      ).getTime();
+    }
   }
-  return session.createdAt || 0;
+
+  // 3. Check dateStr or date (e.g. "2026년 12월 24일", "2026년 7월 30일 (목)")
+  const rawDateStr = (session.dateStr || session.date || '').trim();
+  if (rawDateStr) {
+    const match = rawDateStr.match(/(\d{4})[^\d]+(\d{1,2})[^\d]+(\d{1,2})/);
+    if (match) {
+      return new Date(
+        parseInt(match[1], 10),
+        parseInt(match[2], 10) - 1,
+        parseInt(match[3], 10)
+      ).getTime();
+    }
+    const t = Date.parse(rawDateStr);
+    if (!isNaN(t)) return t;
+  }
+
+  // 4. Fallback to createdAt or updatedAt timestamp
+  return session.createdAt || session.updatedAt || 0;
 }
 
 /**
- * Sorts sessions so the latest rehearsal date comes first (descending)
+ * Sorts sessions so the latest rehearsal date comes first (descending).
+ * Uses createdAt as tie-breaker for sessions with the same date.
  */
 export function sortSessionsDescending(sessions: RehearsalSession[]): RehearsalSession[] {
-  return [...sessions].sort((a, b) => getSessionDateTimestamp(b) - getSessionDateTimestamp(a));
+  if (!Array.isArray(sessions)) return [];
+  return [...sessions].sort((a, b) => {
+    const diff = getSessionDateTimestamp(b) - getSessionDateTimestamp(a);
+    if (diff !== 0) return diff;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
 }
+
 
 /**
  * Calculates unique members actually assigned to a part across the current session's songs

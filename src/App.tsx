@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import html2canvas from 'html2canvas';
 import confetti from 'canvas-confetti';
 import { AlertCircle } from 'lucide-react';
@@ -24,30 +24,23 @@ import {
   LOCAL_STORAGE_KEY,
 } from './services/firestoreService';
 
-const ACTIVE_SESSION_KEY = 'nubi_band_active_session_id';
-const LEGACY_ACTIVE_SESSION_KEY = 'noobi_band_active_session_id';
-
 export default function App() {
-  // 1. Initial Load: prioritize localStorage ('nubi_band_data'), fallback to mock data
-  const [sessions, setSessions] = useState<RehearsalSession[]>(() => loadLocalSessions());
+  // 1. Initial Load: prioritize localStorage ('nubi_band_data') sorted in descending order (latest date first)
+  const [sessions, setSessions] = useState<RehearsalSession[]>(() =>
+    sortSessionsDescending(loadLocalSessions())
+  );
 
+  // Always default to the latest rehearsal session (sortedSessions[0]) upon first load or refresh
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    try {
-      const saved =
-        localStorage.getItem(ACTIVE_SESSION_KEY) ||
-        localStorage.getItem(LEGACY_ACTIVE_SESSION_KEY);
-      const initialList = loadLocalSessions();
-      if (saved && initialList.some((s) => s.id === saved)) {
-        return saved;
-      }
-      if (initialList.length > 0) {
-        return initialList[0].id;
-      }
-    } catch {
-      // ignore
+    const initialList = sortSessionsDescending(loadLocalSessions());
+    if (initialList.length > 0) {
+      return initialList[0].id;
     }
     return INITIAL_SESSIONS[0]?.id || 'session-2026-07-30';
   });
+
+  // Track initial sync so fresh data from Firestore immediately selects the latest session
+  const isInitialSyncRef = useRef<boolean>(true);
 
   // Modal states
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
@@ -70,33 +63,38 @@ export default function App() {
     }
   }, [sessions]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
-    } catch {
-      // ignore
-    }
-  }, [activeSessionId]);
-
   // Subscribe to real-time updates / multi-tab storage events
   useEffect(() => {
     const unsubscribe = subscribeToRehearsalSessions((updatedSessions) => {
       if (updatedSessions && updatedSessions.length > 0) {
-        setSessions(updatedSessions);
-        setActiveSessionId((prev) => {
-          if (!updatedSessions.some((s) => s.id === prev)) {
-            return updatedSessions[0].id;
-          }
-          return prev;
-        });
+        const sorted = sortSessionsDescending(updatedSessions);
+        setSessions(sorted);
+
+        if (isInitialSyncRef.current) {
+          // On initial page load or refresh, always default to the latest rehearsal session (index 0)
+          isInitialSyncRef.current = false;
+          setActiveSessionId(sorted[0].id);
+        } else {
+          // In subsequent background updates (e.g. concurrent edits), preserve active session if still present
+          setActiveSessionId((prev) => {
+            if (!prev || !sorted.some((s) => s.id === prev)) {
+              return sorted[0].id;
+            }
+            return prev;
+          });
+        }
       }
     });
 
     return () => unsubscribe();
   }, []);
 
+  const sortedSessions = sortSessionsDescending(sessions);
   const activeSession =
-    sessions.find((s) => s.id === activeSessionId) || sessions[0] || INITIAL_SESSIONS[0];
+    sortedSessions.find((s) => s.id === activeSessionId) ||
+    sortedSessions[0] ||
+    INITIAL_SESSIONS[0];
+
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -183,9 +181,11 @@ export default function App() {
       id: newSessionId,
       dateStr: formattedDateStr,
       dateKey,
+      date: formattedDateStr,
       sheetTitle: activeSession?.sheetTitle || '누비 밴드 파트 배분',
       songs: songsToCarry,
       createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
 
     setSessions((prev) => {
@@ -689,7 +689,7 @@ export default function App() {
     <div className="min-h-screen bg-[#f8f9fa] flex flex-col font-sans select-none text-gray-900">
       {/* 1. Clean Top Header Bar */}
       <Toolbar
-        sessions={sessions}
+        sessions={sortedSessions}
         activeSessionId={activeSessionId}
         onSelectSession={setActiveSessionId}
         onOpenAddDateModal={() => setIsAddDateModalOpen(true)}
