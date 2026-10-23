@@ -7,17 +7,6 @@ interface AddSongModalProps {
   onAddSong: (title: string, artist: string, notes: string) => void;
 }
 
-const SONG_PRESETS = [
-  { title: 'Hysteria', artist: 'Muse' },
-  { title: 'Are You Gonna Be My Girl', artist: 'Jet' },
-  { title: 'Creep', artist: 'Radiohead' },
-  { title: '담배가게 아가씨', artist: '송창식/YB' },
-  { title: '뜨거운 여름밤은 가고 남은 건 볼품없지만', artist: '잔나비' },
-  { title: '사건의 지평선', artist: '윤하' },
-  { title: '고민중독', artist: 'QWER' },
-  { title: '한 페이지가 될 수 있게', artist: 'DAY6' },
-];
-
 export const AddSongModal: React.FC<AddSongModalProps> = ({
   isOpen,
   onClose,
@@ -37,11 +26,6 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({
     setArtist('');
     setNotes('');
     onClose();
-  };
-
-  const handleSelectPreset = (preset: { title: string; artist: string }) => {
-    setTitle(preset.title);
-    setArtist(preset.artist);
   };
 
   return (
@@ -68,7 +52,7 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="text-[#5f6368] hover:text-[#202124] p-1 rounded hover:bg-gray-200 transition"
+            className="text-[#5f6368] hover:text-[#202124] p-1 rounded hover:bg-gray-200 transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -117,36 +101,17 @@ export const AddSongModal: React.FC<AddSongModalProps> = ({
             />
           </div>
 
-          {/* Preset Suggestions */}
-          <div className="pt-2">
-            <span className="text-[11px] text-[#5f6368] font-medium block mb-1">
-              밴드 추천 선곡 프리셋:
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {SONG_PRESETS.map((p) => (
-                <button
-                  key={p.title}
-                  type="button"
-                  onClick={() => handleSelectPreset(p)}
-                  className="text-[11px] px-2 py-0.5 bg-[#f1f3f4] hover:bg-[#e8eaed] text-[#3c4043] rounded border border-gray-200 transition"
-                >
-                  {p.title} ({p.artist})
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="pt-3 border-t border-[#dadce0] flex justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 text-xs font-medium bg-white hover:bg-gray-100 border border-[#dadce0] text-[#3c4043] rounded transition"
+              className="px-3.5 py-1.5 text-xs font-medium bg-white hover:bg-gray-100 border border-[#dadce0] text-[#3c4043] rounded transition cursor-pointer"
             >
               취소
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center gap-1.5 shadow-xs transition"
+              className="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded flex items-center gap-1.5 shadow-xs transition cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>곡 추가하기</span>
