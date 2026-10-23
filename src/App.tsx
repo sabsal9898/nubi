@@ -14,19 +14,29 @@ import {
   subscribeToRehearsalSessions,
   saveSession,
   removeSession,
+  loadLocalSessions,
+  LOCAL_STORAGE_KEY,
 } from './services/firestoreService';
 
-const ACTIVE_SESSION_KEY = 'noobi_band_active_session_id';
+const ACTIVE_SESSION_KEY = 'nubi_band_active_session_id';
+const LEGACY_ACTIVE_SESSION_KEY = 'noobi_band_active_session_id';
 
 export default function App() {
-  const [sessions, setSessions] = useState<RehearsalSession[]>(() =>
-    sortSessionsDescending(INITIAL_SESSIONS)
-  );
+  // 1. Initial Load: prioritize localStorage ('nubi_band_data'), fallback to mock data
+  const [sessions, setSessions] = useState<RehearsalSession[]>(() => loadLocalSessions());
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem(ACTIVE_SESSION_KEY);
-      if (saved) return saved;
+      const saved =
+        localStorage.getItem(ACTIVE_SESSION_KEY) ||
+        localStorage.getItem(LEGACY_ACTIVE_SESSION_KEY);
+      const initialList = loadLocalSessions();
+      if (saved && initialList.some((s) => s.id === saved)) {
+        return saved;
+      }
+      if (initialList.length > 0) {
+        return initialList[0].id;
+      }
     } catch {
       // ignore
     }
@@ -45,11 +55,28 @@ export default function App() {
   const [isCopyingImage, setIsCopyingImage] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Subscribe to real-time Firestore / local storage sessions
+  // 2. Automatic synchronization to localStorage on state changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sessions));
+    } catch (err) {
+      console.warn('Failed to persist sessions to localStorage:', err);
+    }
+  }, [sessions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
+    } catch {
+      // ignore
+    }
+  }, [activeSessionId]);
+
+  // Subscribe to real-time updates / multi-tab storage events
   useEffect(() => {
     const unsubscribe = subscribeToRehearsalSessions((updatedSessions) => {
-      setSessions(updatedSessions);
-      if (updatedSessions.length > 0) {
+      if (updatedSessions && updatedSessions.length > 0) {
+        setSessions(updatedSessions);
         setActiveSessionId((prev) => {
           if (!updatedSessions.some((s) => s.id === prev)) {
             return updatedSessions[0].id;
@@ -62,14 +89,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(ACTIVE_SESSION_KEY, activeSessionId);
-    } catch {
-      // ignore
-    }
-  }, [activeSessionId]);
-
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0] || INITIAL_SESSIONS[0];
 
@@ -79,6 +98,15 @@ export default function App() {
       setToastMessage((prev) => (prev === msg ? null : prev));
     }, 3200);
   }, []);
+
+  // Helper to persist sessions synchronously and return updated session
+  const persistSessionsLocally = (nextSessions: RehearsalSession[]) => {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(nextSessions));
+    } catch (e) {
+      console.warn('Direct localStorage save failed:', e);
+    }
+  };
 
   // Handler: Request session delete with 1-session guard
   const handleRequestDeleteSession = () => {
@@ -102,17 +130,21 @@ export default function App() {
     const remaining = sessions.filter((s) => s.id !== sessionToDeleteId);
     const sortedRemaining = sortSessionsDescending(remaining);
 
+    // Update React state & localStorage immediately
+    setSessions(sortedRemaining);
+    persistSessionsLocally(sortedRemaining);
+
     if (sortedRemaining.length > 0) {
       setActiveSessionId(sortedRemaining[0].id);
     }
     setIsDeleteSessionModalOpen(false);
+    showToast(`🗑️ '${deletedDateStr}' 합주일이 삭제되었습니다.`);
 
+    // Isolated cloud sync
     try {
       await removeSession(sessionToDeleteId);
-      showToast(`🗑️ '${deletedDateStr}' 합주일이 완전히 삭제되었습니다.`);
     } catch (e) {
-      console.error(e);
-      showToast('삭제 중 오류가 발생했습니다.');
+      console.warn('Cloud sync skipped:', e);
     }
   };
 
@@ -148,13 +180,20 @@ export default function App() {
       createdAt: Date.now(),
     };
 
+    setSessions((prev) => {
+      const next = sortSessionsDescending([newSession, ...prev]);
+      persistSessionsLocally(next);
+      return next;
+    });
+
     setActiveSessionId(newSessionId);
     showToast(`📅 '${dateStr}' 합주가 추가되었습니다! (${songsToCarry.length}개 곡 이월)`);
 
+    // Isolated cloud sync
     try {
       await saveSession(newSession);
     } catch (e) {
-      console.error(e);
+      console.warn('Cloud sync skipped:', e);
     }
   };
 
@@ -173,39 +212,61 @@ export default function App() {
       notes,
     };
 
-    const targetSession = sessions.find((s) => s.id === activeSessionId);
-    if (!targetSession) return;
+    let targetUpdatedSession: RehearsalSession | null = null;
 
-    const updatedSession: RehearsalSession = {
-      ...targetSession,
-      songs: [newSong, ...targetSession.songs],
-    };
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          targetUpdatedSession = {
+            ...s,
+            songs: [newSong, ...s.songs],
+          };
+          return targetUpdatedSession;
+        }
+        return s;
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
 
     showToast(`🎵 새 곡 '${title}'이(가) 추가되었습니다!`);
 
-    try {
-      await saveSession(updatedSession);
-    } catch (e) {
-      console.error(e);
+    if (targetUpdatedSession) {
+      try {
+        await saveSession(targetUpdatedSession);
+      } catch (e) {
+        console.warn('Cloud sync skipped:', e);
+      }
     }
   };
 
   // Handler: Delete song from current session only
   const handleDeleteSong = async (songId: string) => {
-    const targetSession = sessions.find((s) => s.id === activeSessionId);
-    if (!targetSession) return;
+    let targetUpdatedSession: RehearsalSession | null = null;
 
-    const updatedSession: RehearsalSession = {
-      ...targetSession,
-      songs: targetSession.songs.filter((s) => s.id !== songId),
-    };
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          targetUpdatedSession = {
+            ...s,
+            songs: s.songs.filter((song) => song.id !== songId),
+          };
+          return targetUpdatedSession;
+        }
+        return s;
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
 
     showToast('곡이 현재 합주 목록에서 삭제되었습니다.');
 
-    try {
-      await saveSession(updatedSession);
-    } catch (e) {
-      console.error(e);
+    if (targetUpdatedSession) {
+      try {
+        await saveSession(targetUpdatedSession);
+      } catch (e) {
+        console.warn('Cloud sync skipped:', e);
+      }
     }
   };
 
@@ -215,39 +276,61 @@ export default function App() {
     title: string,
     artist: string
   ) => {
-    const targetSession = sessions.find((s) => s.id === activeSessionId);
-    if (!targetSession) return;
+    let targetUpdatedSession: RehearsalSession | null = null;
 
-    const updatedSession: RehearsalSession = {
-      ...targetSession,
-      songs: targetSession.songs.map((s) =>
-        s.id === songId ? { ...s, title, artist } : s
-      ),
-    };
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          targetUpdatedSession = {
+            ...s,
+            songs: s.songs.map((song) =>
+              song.id === songId ? { ...song, title, artist } : song
+            ),
+          };
+          return targetUpdatedSession;
+        }
+        return s;
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
 
-    try {
-      await saveSession(updatedSession);
-    } catch (e) {
-      console.error(e);
+    if (targetUpdatedSession) {
+      try {
+        await saveSession(targetUpdatedSession);
+      } catch (e) {
+        console.warn('Cloud sync skipped:', e);
+      }
     }
   };
 
   // Handler: Update song notes
   const handleUpdateSongNotes = async (songId: string, notes: string) => {
-    const targetSession = sessions.find((s) => s.id === activeSessionId);
-    if (!targetSession) return;
+    let targetUpdatedSession: RehearsalSession | null = null;
 
-    const updatedSession: RehearsalSession = {
-      ...targetSession,
-      songs: targetSession.songs.map((s) =>
-        s.id === songId ? { ...s, notes } : s
-      ),
-    };
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          targetUpdatedSession = {
+            ...s,
+            songs: s.songs.map((song) =>
+              song.id === songId ? { ...song, notes } : song
+            ),
+          };
+          return targetUpdatedSession;
+        }
+        return s;
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
 
-    try {
-      await saveSession(updatedSession);
-    } catch (e) {
-      console.error(e);
+    if (targetUpdatedSession) {
+      try {
+        await saveSession(targetUpdatedSession);
+      } catch (e) {
+        console.warn('Cloud sync skipped:', e);
+      }
     }
   };
 
@@ -258,23 +341,35 @@ export default function App() {
     members: string[]
   ) => {
     if (part === 'notes') return;
-    const targetSession = sessions.find((s) => s.id === activeSessionId);
-    if (!targetSession) return;
 
-    const updatedSession: RehearsalSession = {
-      ...targetSession,
-      songs: targetSession.songs.map((s) => {
-        if (s.id === songId) {
-          return { ...s, [part]: members };
+    let targetUpdatedSession: RehearsalSession | null = null;
+
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          targetUpdatedSession = {
+            ...s,
+            songs: s.songs.map((song) => {
+              if (song.id === songId) {
+                return { ...song, [part]: members };
+              }
+              return song;
+            }),
+          };
+          return targetUpdatedSession;
         }
         return s;
-      }),
-    };
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
 
-    try {
-      await saveSession(updatedSession);
-    } catch (e) {
-      console.error(e);
+    if (targetUpdatedSession) {
+      try {
+        await saveSession(targetUpdatedSession);
+      } catch (e) {
+        console.warn('Cloud sync skipped:', e);
+      }
     }
   };
 
@@ -289,31 +384,42 @@ export default function App() {
       return;
     }
 
-    const targetSession = sessions.find((s) => s.id === activeSessionId);
-    if (!targetSession) return;
+    let targetUpdatedSession: RehearsalSession | null = null;
 
-    const updatedSession: RehearsalSession = {
-      ...targetSession,
-      songs: targetSession.songs.map((s) => {
-        if (s.id === songId) {
-          const currentList = s[part] || [];
-          if (!currentList.includes(memberName)) {
-            return {
-              ...s,
-              [part]: [...currentList, memberName],
-            };
-          }
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          targetUpdatedSession = {
+            ...s,
+            songs: s.songs.map((song) => {
+              if (song.id === songId) {
+                const currentList = song[part] || [];
+                if (!currentList.includes(memberName)) {
+                  return {
+                    ...song,
+                    [part]: [...currentList, memberName],
+                  };
+                }
+              }
+              return song;
+            }),
+          };
+          return targetUpdatedSession;
         }
         return s;
-      }),
-    };
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
 
     showToast(`✅ [${memberName}]님이 배정되었습니다.`);
 
-    try {
-      await saveSession(updatedSession);
-    } catch (e) {
-      console.error(e);
+    if (targetUpdatedSession) {
+      try {
+        await saveSession(targetUpdatedSession);
+      } catch (e) {
+        console.warn('Cloud sync skipped:', e);
+      }
     }
   };
 
@@ -324,26 +430,40 @@ export default function App() {
     memberName: string
   ) => {
     if (part === 'notes') return;
-    const targetSession = sessions.find((s) => s.id === activeSessionId);
-    if (!targetSession) return;
 
-    const updatedSession: RehearsalSession = {
-      ...targetSession,
-      songs: targetSession.songs.map((s) => {
-        if (s.id === songId) {
-          return {
+    let targetUpdatedSession: RehearsalSession | null = null;
+
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          targetUpdatedSession = {
             ...s,
-            [part]: (s[part] || []).filter((m) => m !== memberName),
+            songs: s.songs.map((song) => {
+              if (song.id === songId) {
+                return {
+                  ...song,
+                  [part]: (song[part] || []).filter((m) => m !== memberName),
+                };
+              }
+              return song;
+            }),
           };
+          return targetUpdatedSession;
         }
         return s;
-      }),
-    };
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
 
-    try {
-      await saveSession(updatedSession);
-    } catch (e) {
-      console.error(e);
+    showToast('파트에서 제외되었습니다.');
+
+    if (targetUpdatedSession) {
+      try {
+        await saveSession(targetUpdatedSession);
+      } catch (e) {
+        console.warn('Cloud sync skipped:', e);
+      }
     }
   };
 
