@@ -65,7 +65,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     <button
       type="button"
       onClick={onOpenAddDateModal}
-      className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 rounded-lg shadow-2xs transition active:scale-98 shrink-0 cursor-pointer"
+      className="inline-flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 rounded-lg shadow-2xs transition active:scale-98 shrink-0 cursor-pointer"
     >
       <Plus className="w-3.5 h-3.5 text-gray-500" />
       <span>합주일 추가</span>
@@ -78,11 +78,43 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       type="button"
       onClick={onRequestDeleteSession}
       title="현재 보고 있는 합주일 삭제"
-      className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50/70 hover:bg-rose-100/80 border border-rose-200 rounded-lg shadow-2xs transition active:scale-98 shrink-0 cursor-pointer"
+      className="inline-flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50/70 hover:bg-rose-100/80 border border-rose-200 rounded-lg shadow-2xs transition active:scale-98 shrink-0 cursor-pointer"
     >
       <Trash2 className="w-3.5 h-3.5 text-rose-500" />
       <span>합주일 삭제</span>
     </button>
+  );
+
+  // 1. 합주일 관리 3종 세트 (선택 토글 + 추가 + 삭제)
+  const DateManagementGroup = (
+    <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap">
+      {/* 1) 합주일 선택 토글/드롭다운 */}
+      <div className="flex items-center gap-1 bg-gray-50 hover:bg-gray-100/80 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border border-gray-200 transition shrink-0">
+        <Calendar className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+        <span className="hidden sm:inline text-xs font-medium text-gray-500 shrink-0">회차:</span>
+        <div className="relative flex items-center">
+          <select
+            value={activeSessionId}
+            onChange={(e) => onSelectSession(e.target.value)}
+            aria-label="합주 회차 선택"
+            className="appearance-none bg-transparent pr-3.5 text-xs font-semibold text-gray-900 focus:outline-none cursor-pointer"
+          >
+            {sortedSessions.map((sess) => (
+              <option key={sess.id} value={sess.id}>
+                {sess.dateStr}
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="w-3 h-3 text-gray-400 absolute right-0 pointer-events-none" />
+        </div>
+      </div>
+
+      {/* 2) + 합주일 추가 */}
+      {AddDateBtn}
+
+      {/* 3) 합주일 삭제 */}
+      {DeleteDateBtn}
+    </div>
   );
 
   // Button: + 곡 추가
@@ -189,51 +221,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* 1. DESKTOP & TABLET VIEW (md and above): Single-row layout */}
         {/* ======================================================== */}
         <div className="hidden md:flex items-center justify-between h-15 gap-4">
-          {/* Left: Brand Title & Date Selector */}
-          <div className="flex items-center gap-5">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-2xs">
-                N
-              </div>
-              <div>
-                <h1 className="text-base lg:text-lg font-bold text-gray-900 tracking-tight leading-none">
-                  누비 밴드 파트 배분
-                </h1>
-                <span className="text-[11px] text-gray-500 font-normal">
-                  Noobi Band Practice Part Manager
-                </span>
-              </div>
+          {/* Header Left: Brand Title */}
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm shadow-2xs">
+              N
             </div>
-
-            {/* Date Selector Dropdown */}
-            <div className="flex items-center gap-1.5 bg-gray-50 hover:bg-gray-100/80 px-2.5 py-1.5 rounded-lg border border-gray-200 transition">
-              <Calendar className="w-3.5 h-3.5 text-gray-500 shrink-0" />
-              <span className="text-xs font-medium text-gray-500 shrink-0">회차:</span>
-              <div className="relative flex items-center">
-                <select
-                  value={activeSessionId}
-                  onChange={(e) => onSelectSession(e.target.value)}
-                  aria-label="합주 회차 선택"
-                  className="appearance-none bg-transparent pr-4 text-xs lg:text-sm font-semibold text-gray-900 focus:outline-none cursor-pointer"
-                >
-                  {sortedSessions.map((sess) => (
-                    <option key={sess.id} value={sess.id}>
-                      {sess.dateStr}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3 h-3 text-gray-400 absolute right-0 pointer-events-none" />
-              </div>
+            <div>
+              <h1 className="text-base lg:text-lg font-bold text-gray-900 tracking-tight leading-none">
+                누비 밴드 파트 배분
+              </h1>
+              <span className="text-[11px] text-gray-500 font-normal">
+                Noobi Band Practice Part Manager
+              </span>
             </div>
           </div>
 
-          {/* Right: Action Buttons Group */}
-          <div className="flex items-center gap-2">
-            {/* Rehearsal Date Buttons Pair */}
-            <div className="flex items-center gap-1.5">
-              {AddDateBtn}
-              {DeleteDateBtn}
-            </div>
+          {/* Header Right: [합주일 관리 3종 세트] | [곡/파트 버튼] | [사진 드롭다운] */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* 합주일 관리 3종 세트: [합주일 선택 토글] [+ 합주일 추가] [합주일 삭제] */}
+            {DateManagementGroup}
 
             <div className="h-4 w-px bg-gray-200 mx-1" />
 
@@ -243,7 +249,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               {AssignPartBtn}
             </div>
 
-            <div className="h-4 w-px bg-gray-200 mx-1" />
+            <div className="h-4 w-px bg-gray-200 mx-0.5" />
 
             {/* Unified Photo Action Dropdown */}
             {ShareDropdown}
@@ -251,49 +257,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         {/* ======================================================== */}
-        {/* 2. MOBILE VIEW (< md): Clean 2 lines, no horizontal scroll */}
+        {/* 2. MOBILE VIEW (< md): Clean layout, no horizontal scroll */}
         {/* ======================================================== */}
         <div className="flex flex-col md:hidden w-full gap-2">
-          {/* Top Line: Brand Title (left) & Date Dropdown (right) */}
-          <div className="flex items-center justify-between w-full">
-            {/* Brand Title */}
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
-                N
-              </div>
-              <h1 className="text-sm font-bold text-gray-900 tracking-tight leading-none">
-                누비 밴드 파트 배분
-              </h1>
+          {/* Top Line: Brand Title */}
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+              N
             </div>
-
-            {/* Date Selector Dropdown */}
-            <div className="flex items-center gap-1 bg-gray-50 px-2.5 py-1.5 rounded-lg border border-gray-200 shrink-0">
-              <Calendar className="w-3 h-3 text-gray-500 shrink-0" />
-              <div className="relative flex items-center">
-                <select
-                  value={activeSessionId}
-                  onChange={(e) => onSelectSession(e.target.value)}
-                  aria-label="합주 회차 선택"
-                  className="appearance-none bg-transparent pr-3.5 text-xs font-semibold text-gray-900 focus:outline-none cursor-pointer"
-                >
-                  {sortedSessions.map((sess) => (
-                    <option key={sess.id} value={sess.id}>
-                      {sess.dateStr}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3 h-3 text-gray-400 absolute right-0 pointer-events-none" />
-              </div>
-            </div>
+            <h1 className="text-sm font-bold text-gray-900 tracking-tight leading-none">
+              누비 밴드 파트 배분
+            </h1>
           </div>
 
-          {/* [1번째 줄]: 합주일 관련 라인 (우측 정렬: [+ 합주일 추가] 및 [합주일 삭제]) */}
-          <div className="flex justify-end items-center gap-1.5 w-full">
-            {AddDateBtn}
-            {DeleteDateBtn}
+          {/* [1번째 줄]: 타이틀 바로 아래 줄에 [합주일 관리 3종 세트] 왼쪽 정렬 */}
+          <div className="flex items-center justify-start w-full">
+            {DateManagementGroup}
           </div>
 
-          {/* [2번째 줄]: 곡/파트 액션 (좌) 및 통합 사진 드롭다운 (우) */}
+          {/* [2번째 줄]: 곡/파트 액션 (좌) 및 통합 사진 드롭다운 (우) 양 끝 분할 정렬 */}
           <div className="flex justify-between items-center w-full pt-1.5 border-t border-gray-100">
             {/* 좌측 그룹: [+ 곡 추가], [파트 선택] */}
             <div className="flex items-center gap-1.5">
