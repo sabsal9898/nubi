@@ -261,11 +261,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* ======================================================== */}
         <div className="flex flex-col md:hidden w-full gap-2">
           {/* Top Line: Brand Title */}
-          <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-2"
+            style={{
+              height: '30px',
+              fontStyle: 'normal',
+              fontWeight: 'normal',
+              fontFamily: 'Verdana',
+            }}
+          >
             <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
               N
             </div>
-            <h1 className="text-sm font-bold text-gray-900 tracking-tight leading-none">
+            <h1
+              className="font-bold text-gray-900 tracking-tight leading-none"
+              style={{ fontSize: '23px' }}
+            >
               누비밴드 파트 배분
             </h1>
           </div>
