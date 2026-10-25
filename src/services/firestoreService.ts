@@ -749,3 +749,23 @@ export async function atomicRemoveBandMember(memberName: string): Promise<void> 
     }
   }
 }
+
+/**
+ * Atomically reorders songs for a rehearsal session in Firestore.
+ */
+export async function atomicReorderSongs(
+  sessionId: string,
+  newSongs: Song[]
+): Promise<void> {
+  if (isFirebaseConfigured && db) {
+    const sessionRef = doc(db, SESSIONS_COLLECTION, sessionId);
+    try {
+      await updateDoc(sessionRef, {
+        songs: newSongs.map((s) => sanitizeSongForFirestore(s)),
+        updatedAt: Date.now(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${SESSIONS_COLLECTION}/${sessionId}`);
+    }
+  }
+}

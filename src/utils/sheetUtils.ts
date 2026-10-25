@@ -96,6 +96,61 @@ export function formatSessionDateWithDay(
 }
 
 /**
+ * Formats date consistently as "YYYY-MM-DD(요일)" (e.g. "2026-11-26(목)").
+ * Strips existing "(요일)" to prevent duplicate parentheses.
+ */
+export function formatSessionDateCompact(
+  dateStr?: string | null,
+  fallbackDateKey?: string | null
+): string {
+  if (!dateStr && !fallbackDateKey) return '';
+  const raw = (dateStr || fallbackDateKey || '').trim();
+
+  // Strip any existing trailing day pattern like (월), (화), (수), (목), (금), (토), (일)
+  const cleaned = raw.replace(/\s*[\(\[][일월화수목금토]요일?[\)\]]/g, '').trim();
+
+  // 1. Try matching YYYY-MM-DD or YYYY.MM.DD or YYYY/MM/DD
+  const isoMatch = cleaned.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+  if (isoMatch) {
+    const y = parseInt(isoMatch[1], 10);
+    const m = parseInt(isoMatch[2], 10);
+    const d = parseInt(isoMatch[3], 10);
+    const day = getKoreanDayOfWeek(y, m, d);
+    const mm = String(m).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+    return day ? `${y}-${mm}-${dd}(${day})` : `${y}-${mm}-${dd}`;
+  }
+
+  // 2. Try matching Korean format: YYYY년 M월 D일
+  const korMatch = cleaned.match(/(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일?/);
+  if (korMatch) {
+    const y = parseInt(korMatch[1], 10);
+    const m = parseInt(korMatch[2], 10);
+    const d = parseInt(korMatch[3], 10);
+    const day = getKoreanDayOfWeek(y, m, d);
+    const mm = String(m).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+    return day ? `${y}-${mm}-${dd}(${day})` : `${y}-${mm}-${dd}`;
+  }
+
+  // 3. Fallback: check fallbackDateKey if provided
+  if (fallbackDateKey && fallbackDateKey !== raw) {
+    const keyMatch = fallbackDateKey.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (keyMatch) {
+      const y = parseInt(keyMatch[1], 10);
+      const m = parseInt(keyMatch[2], 10);
+      const d = parseInt(keyMatch[3], 10);
+      const day = getKoreanDayOfWeek(y, m, d);
+      const mm = String(m).padStart(2, '0');
+      const dd = String(d).padStart(2, '0');
+      return day ? `${y}-${mm}-${dd}(${day})` : `${y}-${mm}-${dd}`;
+    }
+  }
+
+  return cleaned;
+}
+
+/**
  * Parses date string or ID to a comparable millisecond timestamp.
  * Supports dateKey, dateRaw, dateStr, date, ID containing YYYY-MM-DD, or createdAt.
  */

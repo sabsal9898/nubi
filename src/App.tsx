@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toCanvas } from 'html-to-image';
-import confetti from 'canvas-confetti';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { RehearsalSession, Song, PartType } from './types';
 import { INITIAL_SESSIONS } from './constants/defaultData';
@@ -10,6 +9,7 @@ import { PartAssignmentModal } from './components/PartAssignmentModal';
 import { AddSongModal } from './components/AddSongModal';
 import { AddDateModal } from './components/AddDateModal';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
+import { AllSongsModal } from './components/AllSongsModal';
 import { sortSessionsDescending, formatSessionDateWithDay } from './utils/sheetUtils';
 import {
   subscribeToRehearsalSessions,
@@ -21,6 +21,7 @@ import {
   atomicAssignMember,
   atomicRemoveMember,
   atomicUpdateSongPartMembers,
+  atomicReorderSongs,
   loadLocalSessions,
   LOCAL_STORAGE_KEY,
 } from './services/firestoreService';
@@ -55,6 +56,7 @@ export default function App() {
   const [isCopyingImage, setIsCopyingImage] = useState(false);
   const [previewImageDataUrl, setPreviewImageDataUrl] = useState<string | null>(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [isAllSongsModalOpen, setIsAllSongsModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // 2. Automatic synchronization to localStorage on state changes
@@ -274,6 +276,34 @@ export default function App() {
       await atomicDeleteSong(activeSessionId, songId);
     } catch (e) {
       console.warn('Cloud atomicDeleteSong skipped:', e);
+    }
+  };
+
+  // Handler: Reorder songs in the active rehearsal session
+  const handleReorderSongs = async (newSongs: Song[]) => {
+    const now = Date.now();
+    setSessions((prev) => {
+      const next = prev.map((s) => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            updatedAt: now,
+            songs: newSongs,
+          };
+        }
+        return s;
+      });
+      persistSessionsLocally(next);
+      return next;
+    });
+
+    showToast('곡 순서가 변경되었습니다.');
+
+    // Atomic / Firestore update
+    try {
+      await atomicReorderSongs(activeSessionId, newSongs);
+    } catch (e) {
+      console.warn('Cloud atomicReorderSongs skipped:', e);
     }
   };
 
@@ -602,7 +632,7 @@ export default function App() {
     }
   };
 
-  // Handler: High Quality PNG Image File Download
+  // Handler: High Quality PNG Image File Direct Download
   const handleCaptureImage = async () => {
     try {
       setIsCapturing(true);
@@ -613,31 +643,20 @@ export default function App() {
         return;
       }
 
-      setPreviewImageDataUrl(dataUrl);
-      const dateName = (activeSession.dateKey || '배정표').replace(/[^0-9-]/g, '');
-      const fileName = `누비밴드_합주배정표_${dateName || activeSession.dateStr}.png`;
+      const currentSessionDate =
+        (activeSession.dateKey || activeSession.dateStr || '배정표').replace(/[^0-9-]/g, '') ||
+        activeSession.dateStr;
+      const fileName = `누비밴드_합주배정표_${currentSessionDate}.png`;
 
-      // Trigger direct download
-      try {
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } catch (dlErr) {
-        console.warn('Direct download skipped:', dlErr);
-      }
+      // Trigger direct download without preview modal or screen flash
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-      confetti({
-        particleCount: 50,
-        spread: 60,
-        origin: { y: 0.8 },
-      });
-
-      // Show preview modal so mobile users can long-press to save or share
-      setIsPreviewModalOpen(true);
-      showToast(`📷 배정표 이미지가 생성되었습니다.`);
+      showToast('이미지가 다운로드되었습니다.');
     } catch (err) {
       console.error('Image capture error', err);
       showToast('이미지 저장 중 오류가 발생했습니다.');
@@ -700,21 +719,12 @@ export default function App() {
         activeSessionId={activeSessionId}
         onSelectSession={setActiveSessionId}
         onOpenAddDateModal={() => setIsAddDateModalOpen(true)}
-        onOpenAddSongModal={() => setIsAddSongModalOpen(true)}
-        onOpenAssignModal={() => {
-          setAssignModalSongId(undefined);
-          setAssignModalPart(undefined);
-          setIsAssignModalOpen(true);
-        }}
-        onCaptureImage={handleCaptureImage}
-        onCopyImageToClipboard={handleCopyImageToClipboard}
+        onOpenAllSongsModal={() => setIsAllSongsModalOpen(true)}
         onRequestDeleteSession={handleRequestDeleteSession}
-        isCapturing={isCapturing}
-        isCopyingImage={isCopyingImage}
       />
 
-      {/* 2. Main Content (Assignment Table Card) */}
-      <main className="flex-1 w-full flex flex-col">
+      {/* 2. Main Content (Assignment Table Card with embedded action toolbar) */}
+      <main className="flex-1 w-full flex flex-col pt-5 sm:pt-6 pb-8">
         <SheetTable
           session={activeSession}
           onUpdateSongPart={handleUpdateSongPart}
@@ -723,6 +733,18 @@ export default function App() {
           onUpdateSongInfo={handleUpdateSongInfo}
           onDeleteSong={handleDeleteSong}
           onOpenAssignModalWithSong={handleOpenAssignModalWithSong}
+          onOpenAllSongsModal={() => setIsAllSongsModalOpen(true)}
+          onReorderSongs={handleReorderSongs}
+          onOpenAddSongModal={() => setIsAddSongModalOpen(true)}
+          onOpenAssignModal={() => {
+            setAssignModalSongId(undefined);
+            setAssignModalPart(undefined);
+            setIsAssignModalOpen(true);
+          }}
+          onCaptureImage={handleCaptureImage}
+          onCopyImageToClipboard={handleCopyImageToClipboard}
+          isCapturing={isCapturing}
+          isCopyingImage={isCopyingImage}
         />
       </main>
 
@@ -792,13 +814,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Capture / Loading Indicator Overlay */}
-      {(isCapturing || isCopyingImage) && (
+      {/* Loading Indicator Overlay (클립보드 이미지 복사 시에만 노출) */}
+      {isCopyingImage && (
         <div className="fixed inset-0 z-70 flex flex-col items-center justify-center bg-black/45 backdrop-blur-xs select-none animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl px-6 py-5 shadow-2xl border border-gray-200 flex flex-col items-center gap-3">
             <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
             <div className="text-center">
-              <p className="text-sm font-bold text-gray-900">배정표 이미지 생성 중...</p>
+              <p className="text-sm font-bold text-gray-900">클립보드 복사 중...</p>
               <p className="text-xs text-gray-500 mt-0.5">고화질 표 이미지를 변환하고 있습니다.</p>
             </div>
           </div>
@@ -813,6 +835,13 @@ export default function App() {
         fileName={`누비밴드_합주배정표_${(activeSession.dateKey || '배정표').replace(/[^0-9-]/g, '') || activeSession.dateStr}.png`}
         dateLabel={formatSessionDateWithDay(activeSession.dateStr, activeSession.dateKey)}
         onShowToast={showToast}
+      />
+
+      {/* All Songs History & Merged Part Assignment Modal */}
+      <AllSongsModal
+        isOpen={isAllSongsModalOpen}
+        onClose={() => setIsAllSongsModalOpen(false)}
+        sessions={sessions}
       />
 
       {/* Toast Notification */}

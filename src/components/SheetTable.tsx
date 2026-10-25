@@ -1,5 +1,19 @@
-import React, { useState } from 'react';
-import { Trash2, Edit2, AlertCircle, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Trash2,
+  Edit2,
+  AlertCircle,
+  X,
+  ListMusic,
+  GripVertical,
+  Plus,
+  UserCheck,
+  Camera,
+  ChevronDown,
+  Download,
+  ClipboardCopy,
+  Loader2,
+} from 'lucide-react';
 import { RehearsalSession, PartType, Song } from '../types';
 import {
   getAssignedMembersForPart,
@@ -16,6 +30,14 @@ interface SheetTableProps {
   onUpdateSongInfo?: (songId: string, title: string, artist: string, notes: string) => void;
   onDeleteSong: (songId: string) => void;
   onOpenAssignModalWithSong?: (songId: string, part?: PartType) => void;
+  onOpenAllSongsModal?: () => void;
+  onReorderSongs?: (reorderedSongs: Song[]) => void;
+  onOpenAddSongModal?: () => void;
+  onOpenAssignModal?: () => void;
+  onCaptureImage?: () => void;
+  onCopyImageToClipboard?: () => void;
+  isCapturing?: boolean;
+  isCopyingImage?: boolean;
 }
 
 export const SheetTable: React.FC<SheetTableProps> = ({
@@ -26,7 +48,34 @@ export const SheetTable: React.FC<SheetTableProps> = ({
   onUpdateSongInfo,
   onDeleteSong,
   onOpenAssignModalWithSong,
+  onOpenAllSongsModal,
+  onReorderSongs,
+  onOpenAddSongModal,
+  onOpenAssignModal,
+  onCaptureImage,
+  onCopyImageToClipboard,
+  isCapturing = false,
+  isCopyingImage = false,
 }) => {
+  // Dropdown state for unified image action menu
+  const [isShareMenuOpen, setIsShareMenuOpen] = useState(false);
+  const shareMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (shareMenuRef.current && !shareMenuRef.current.contains(e.target as Node)) {
+        setIsShareMenuOpen(false);
+      }
+    };
+    if (isShareMenuOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isShareMenuOpen]);
+
+  const isBusy = isCapturing || isCopyingImage;
+
   // Modal state for editing song title, artist & notes
   const [songToEdit, setSongToEdit] = useState<Song | null>(null);
 
@@ -55,6 +104,148 @@ export const SheetTable: React.FC<SheetTableProps> = ({
     if (!songToDelete) return;
     onDeleteSong(songToDelete.id);
     setSongToDelete(null);
+  };
+
+  // Drag and drop reordering state
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [isTouchDragging, setIsTouchDragging] = useState<boolean>(false);
+
+  // Refs for mobile long-press touch interaction (220ms delay & scroll protection)
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const touchTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const touchActiveIndexRef = useRef<number | null>(null);
+  const currentDragOverRef = useRef<number | null>(null);
+
+  // Cleanup body overflow on unmount
+  useEffect(() => {
+    return () => {
+      if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+      document.body.style.overflow = '';
+    };
+  }, []);
+
+  const handleReorder = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= session.songs.length || toIndex >= session.songs.length) return;
+
+    const updated = [...session.songs];
+    const [movedSong] = updated.splice(fromIndex, 1);
+    updated.splice(toIndex, 0, movedSong);
+
+    onReorderSongs?.(updated);
+  };
+
+  // --- PC HTML5 Drag & Drop Handlers ---
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.setData('text/plain', String(index));
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIndex !== null && draggedIndex !== targetIndex) {
+      handleReorder(draggedIndex, targetIndex);
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  // --- Mobile Touch with Long-Press (220ms) Handlers ---
+  const cancelTouchTimer = () => {
+    if (touchTimerRef.current) {
+      clearTimeout(touchTimerRef.current);
+      touchTimerRef.current = null;
+    }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent, index: number) => {
+    cancelTouchTimer();
+    const touch = e.touches[0];
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+    touchActiveIndexRef.current = index;
+    currentDragOverRef.current = index;
+
+    // Start 220ms long-press timer
+    touchTimerRef.current = setTimeout(() => {
+      // Tactile haptic feedback if supported by browser
+      if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+        try {
+          window.navigator.vibrate(40);
+        } catch {
+          // ignore
+        }
+      }
+      setIsTouchDragging(true);
+      setDraggedIndex(index);
+      setDragOverIndex(index);
+      document.body.style.overflow = 'hidden'; // prevent page scrolling while dragging row
+    }, 220);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+
+    // If long press has not triggered yet, check if finger moved (normal scroll gesture)
+    if (!isTouchDragging) {
+      if (touchStartPosRef.current) {
+        const deltaX = Math.abs(touch.clientX - touchStartPosRef.current.x);
+        const deltaY = Math.abs(touch.clientY - touchStartPosRef.current.y);
+        if (deltaX > 8 || deltaY > 8) {
+          cancelTouchTimer();
+        }
+      }
+      return;
+    }
+
+    // Touch dragging active: prevent default scroll and calculate target row under finger
+    e.preventDefault();
+
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!element) return;
+
+    const row = element.closest('tr[data-song-index]') as HTMLTableRowElement | null;
+    if (row) {
+      const idxAttr = row.getAttribute('data-song-index');
+      if (idxAttr !== null) {
+        const overIndex = parseInt(idxAttr, 10);
+        if (!isNaN(overIndex) && overIndex !== currentDragOverRef.current) {
+          currentDragOverRef.current = overIndex;
+          setDragOverIndex(overIndex);
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    cancelTouchTimer();
+    if (isTouchDragging) {
+      document.body.style.overflow = '';
+      const from = touchActiveIndexRef.current;
+      const to = currentDragOverRef.current;
+      if (from !== null && to !== null && from !== to) {
+        handleReorder(from, to);
+      }
+      setIsTouchDragging(false);
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      touchActiveIndexRef.current = null;
+      currentDragOverRef.current = null;
+    }
   };
 
   const columnHeaders: {
@@ -116,15 +307,117 @@ export const SheetTable: React.FC<SheetTableProps> = ({
   ];
 
   return (
-    <div className="w-full p-0 sm:py-4 sm:px-4 lg:px-8">
+    <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
       {/* Printable / Capturable Clean White Card */}
-      <div
-        id="sheet-table-capture-area"
-        data-capture-target="true"
-        className="bg-white border-y sm:border border-gray-200 sm:rounded-xl shadow-xs p-0 sm:p-5 w-full"
-      >
-        <div className="overflow-x-auto relative scrollbar-thin scrollbar-thumb-gray-300">
-          <table className="w-full border-separate border-spacing-0 text-xs sm:text-sm select-text border-t border-l border-gray-300">
+      <div className="bg-white border border-gray-200 rounded-xl shadow-xs p-3 sm:p-5 w-full">
+        {/* Table Action Toolbar: [곡 추가], [파트 선택], [📷 캡처] */}
+        <div
+          data-html2canvas-ignore="true"
+          className="w-full flex justify-between items-center pb-3 mb-2.5 border-b border-gray-100 select-none"
+        >
+          {/* 좌측: [+ 곡 추가] + [👤 파트 선택] */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {onOpenAddSongModal && (
+              <button
+                type="button"
+                onClick={onOpenAddSongModal}
+                className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 rounded-lg shadow-2xs transition active:scale-98 shrink-0 cursor-pointer whitespace-nowrap"
+              >
+                <Plus className="w-3.5 h-3.5 text-gray-500" />
+                <span>곡 추가</span>
+              </button>
+            )}
+
+            {onOpenAssignModal && (
+              <button
+                type="button"
+                onClick={onOpenAssignModal}
+                className="inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-2xs transition active:scale-98 shrink-0 cursor-pointer whitespace-nowrap"
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>파트 선택</span>
+              </button>
+            )}
+          </div>
+
+          {/* 우측: [📷 캡처] 드롭다운 버튼 */}
+          <div className="relative shrink-0" ref={shareMenuRef}>
+            <button
+              type="button"
+              onClick={() => setIsShareMenuOpen(!isShareMenuOpen)}
+              disabled={isBusy}
+              title="배정표 사진 저장 및 클립보드 복사"
+              className={`inline-flex items-center justify-center gap-1 p-2 sm:px-2.5 sm:py-1.5 text-xs font-semibold rounded-lg border transition shadow-2xs cursor-pointer active:scale-98 ${
+                isShareMenuOpen
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-500/20'
+                  : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
+              } disabled:opacity-50`}
+            >
+              {isBusy ? (
+                <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
+              ) : (
+                <Camera className="w-4 h-4 text-emerald-600" />
+              )}
+              <ChevronDown
+                className={`w-3 h-3 text-gray-400 transition-transform duration-150 ${
+                  isShareMenuOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
+
+            {/* Popover Menu */}
+            {isShareMenuOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                {/* 1. 사진 저장 (PNG) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsShareMenuOpen(false);
+                    onCaptureImage?.();
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50 flex items-center gap-2.5 transition cursor-pointer"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+                    <Download className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-gray-900 leading-tight">사진 저장 (PNG)</div>
+                    <div className="text-[10px] text-gray-400">배정표 파일 다운로드</div>
+                  </div>
+                </button>
+
+                <div className="my-1 border-t border-gray-100" />
+
+                {/* 2. 사진 복사 (클립보드) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsShareMenuOpen(false);
+                    onCopyImageToClipboard?.();
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50 flex items-center gap-2.5 transition cursor-pointer"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center shrink-0">
+                    <ClipboardCopy className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-gray-900 leading-tight">사진 복사 (클립보드)</div>
+                    <div className="text-[10px] text-gray-400">카톡에 바로 Ctrl+V 붙여넣기</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Capturable Table Area */}
+        <div
+          id="sheet-table-capture-area"
+          data-capture-target="true"
+          className="w-full bg-white"
+        >
+          <div className="overflow-x-auto relative scrollbar-thin scrollbar-thumb-gray-300">
+            <table className="w-full border-separate border-spacing-0 text-xs sm:text-sm select-text border-t border-l border-gray-300">
             <thead>
               {/* Row 1: Date Box Cell (연한 살구/오렌지) - Sticky on mobile */}
               <tr>
@@ -219,24 +512,60 @@ export const SheetTable: React.FC<SheetTableProps> = ({
               </tr>
 
               {/* Song Rows */}
-              {session.songs.map((song) => (
-                <tr
-                  key={song.id}
-                  className="group hover:bg-blue-50/20 transition-colors"
-                >
-                  {/* Song Title & Artist Cell (Sticky Left on Mobile with Opaque White Background) - Read-only to prevent accidental touch edits */}
-                  <td
-                    className="sticky left-0 z-10 bg-white group-hover:bg-[#f8fafd] py-2.5 px-2.5 sm:px-3 text-left font-medium border-r border-b border-gray-300 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.15)] select-text"
+              {session.songs.map((song, index) => {
+                const isCurrentlyDragged = draggedIndex === index;
+                const isTargetOfDrag = dragOverIndex === index && draggedIndex !== index;
+
+                return (
+                  <tr
+                    key={song.id}
+                    data-song-index={index}
+                    onDragOver={(e) => handleDragOver(e, index)}
+                    onDrop={(e) => handleDrop(e, index)}
+                    className={`group transition-all duration-150 ${
+                      isCurrentlyDragged
+                        ? 'opacity-85 bg-blue-50/90 shadow-lg ring-2 ring-blue-500 scale-[1.002] z-30 relative'
+                        : isTargetOfDrag
+                        ? 'bg-blue-50/60 border-t-2 border-t-blue-600'
+                        : 'hover:bg-blue-50/20'
+                    }`}
                   >
-                    <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-1.5">
-                      <span className="font-semibold text-gray-900 leading-tight">
-                        {song.title}
-                      </span>
-                      <span className="text-gray-500 font-normal text-[11px] sm:text-xs truncate">
-                        - {song.artist}
-                      </span>
-                    </div>
-                  </td>
+                    {/* Song Title & Artist Cell with automatic row numbering: 1. Title - Artist */}
+                    <td
+                      draggable={true}
+                      onDragStart={(e) => handleDragStart(e, index)}
+                      onDragEnd={handleDragEnd}
+                      onTouchStart={(e) => handleTouchStart(e, index)}
+                      onTouchMove={handleTouchMove}
+                      onTouchEnd={handleTouchEnd}
+                      onTouchCancel={handleTouchEnd}
+                      title="드래그하여 순서 변경 (모바일: 꾹 누른 후 위아래로 이동)"
+                      className={`sticky left-0 z-10 py-2.5 px-2 sm:px-2.5 text-left font-medium border-r border-b border-gray-300 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.15)] select-none cursor-grab active:cursor-grabbing transition-colors ${
+                        isCurrentlyDragged
+                          ? 'bg-blue-100/90'
+                          : 'bg-white group-hover:bg-[#f8fafd]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <GripVertical
+                          data-html2canvas-ignore="true"
+                          className="w-3.5 h-3.5 text-gray-400 group-hover:text-blue-600 shrink-0 select-none transition-colors pointer-events-none"
+                        />
+                        <div className="flex flex-wrap items-baseline gap-x-1.5 text-left leading-snug min-w-0 flex-1">
+                          {/* 1. 연번 + 곡명 (절대 분리 금지) */}
+                          <span className="font-semibold text-gray-900 whitespace-nowrap">
+                            {index + 1}. {song.title}
+                          </span>
+
+                          {/* 2. 구분자 및 아티스트 (폭 부족 시 통째로 다음 줄로 개행) */}
+                          {song.artist && (
+                            <span className="text-gray-500 text-xs sm:text-sm whitespace-nowrap">
+                              - {song.artist}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
 
                   {/* Part Cells */}
                   {(
@@ -320,11 +649,13 @@ export const SheetTable: React.FC<SheetTableProps> = ({
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+            })}
             </tbody>
           </table>
         </div>
       </div>
+    </div>
 
       {/* Edit Song Information Modal (Title, Artist, Notes with Parts Preserved) */}
       <EditSongModal
