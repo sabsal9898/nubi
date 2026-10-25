@@ -10,6 +10,7 @@ import { AddSongModal } from './components/AddSongModal';
 import { AddDateModal } from './components/AddDateModal';
 import { ImagePreviewModal } from './components/ImagePreviewModal';
 import { AllSongsModal } from './components/AllSongsModal';
+import { PasswordGate } from './components/PasswordGate';
 import { sortSessionsDescending, formatSessionDateWithDay } from './utils/sheetUtils';
 import {
   subscribeToRehearsalSessions,
@@ -58,6 +59,34 @@ export default function App() {
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [isAllSongsModalOpen, setIsAllSongsModalOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // 1.1 Password Lock Authentication State (PIN: 2290)
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('nubi_band_auth_verified') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleAuthSuccess = () => {
+    setIsAuthenticated(true);
+    try {
+      sessionStorage.setItem('nubi_band_auth_verified', 'true');
+    } catch (e) {
+      console.warn('Failed to save auth state to sessionStorage', e);
+    }
+  };
+
+  const handleLockApp = () => {
+    try {
+      sessionStorage.removeItem('nubi_band_auth_verified');
+    } catch (e) {
+      console.warn('Failed to remove auth state from sessionStorage', e);
+    }
+    setIsAuthenticated(false);
+    showToast('화면이 잠겼습니다.');
+  };
 
   // 2. Automatic synchronization to localStorage on state changes
   useEffect(() => {
@@ -711,6 +740,11 @@ export default function App() {
     setIsAssignModalOpen(true);
   };
 
+  // Render password gate if not authenticated
+  if (!isAuthenticated) {
+    return <PasswordGate onSuccess={handleAuthSuccess} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#f8f9fa] flex flex-col font-sans select-none text-gray-900">
       {/* 1. Clean Top Header Bar */}
@@ -721,6 +755,7 @@ export default function App() {
         onOpenAddDateModal={() => setIsAddDateModalOpen(true)}
         onOpenAllSongsModal={() => setIsAllSongsModalOpen(true)}
         onRequestDeleteSession={handleRequestDeleteSession}
+        onLock={handleLockApp}
       />
 
       {/* 2. Main Content (Assignment Table Card with embedded action toolbar) */}

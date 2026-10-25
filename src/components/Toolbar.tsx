@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Trash2,
   ListMusic,
+  Lock,
 } from 'lucide-react';
 import { RehearsalSession } from '../types';
 import { sortSessionsDescending, formatSessionDateCompact } from '../utils/sheetUtils';
@@ -16,6 +17,7 @@ interface ToolbarProps {
   onOpenAddDateModal: () => void;
   onOpenAllSongsModal?: () => void;
   onRequestDeleteSession: () => void;
+  onLock?: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -25,6 +27,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onOpenAddDateModal,
   onOpenAllSongsModal,
   onRequestDeleteSession,
+  onLock,
 }) => {
   // Sort sessions with latest date first
   const sortedSessions = sortSessionsDescending(sessions);
@@ -98,7 +101,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   ) : null;
 
   return (
-    <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-2xs select-none">
+    <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-2xs select-none relative">
+      {onLock && (
+        <button
+          type="button"
+          onClick={onLock}
+          title="화면 잠금"
+          className="absolute top-3.5 right-3.5 sm:top-5 sm:right-6 text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 transition cursor-pointer z-10"
+        >
+          <Lock className="w-4 h-4 text-gray-400" />
+        </button>
+      )}
       <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-4 sm:pb-5">
         {/* [1번째 줄] 메인 타이틀 영역 (화면 가로 중앙 정렬) */}
         <div className="w-full flex justify-center items-center text-center mb-[20px]">
