@@ -34,6 +34,10 @@ export interface AggregatedSong {
   }>;
   latestTimestamp: number;
   playCount: number;
+  firstSessionDate?: string;
+  firstSessionTimestamp?: number;
+  latestSessionDate?: string;
+  initialIndex?: number;
 }
 
 /**
@@ -103,6 +107,22 @@ function formatSessionDateRange(
   };
 }
 
+function getSessionIsoDate(session: RehearsalSession): string {
+  const rawKey = (session.dateKey || (session as any).dateRaw || '').trim();
+  if (rawKey) {
+    const isoMatch = rawKey.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (isoMatch) {
+      return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+    }
+  }
+  const ts = getSessionDateTimestamp(session);
+  if (ts > 0) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  return session.dateKey || session.dateStr || '';
+}
+
 export const AllSongsModal: React.FC<AllSongsModalProps> = ({
   isOpen,
   onClose,
@@ -129,16 +149,21 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
     }
   }, [isOpen]);
 
-  // Sorted list of all sessions descending
+  // Sorted list of all sessions descending for filter dropdown
   const sortedSessions = useMemo(() => sortSessionsDescending(sessions), [sessions]);
 
   // Aggregate and merge songs across all rehearsal sessions
   const aggregatedSongs = useMemo<AggregatedSong[]>(() => {
     const map = new Map<string, AggregatedSong>();
 
-    // Process from oldest to newest or newest to oldest; we maintain latestTimestamp
-    sortedSessions.forEach((session) => {
+    // Process from oldest to newest (chronological order) so the first time a song is encountered is its true first introduction
+    const chronologicalSessions = [...sessions].sort(
+      (a, b) => getSessionDateTimestamp(a) - getSessionDateTimestamp(b)
+    );
+
+    chronologicalSessions.forEach((session) => {
       const sessionTimestamp = getSessionDateTimestamp(session);
+      const sessionIsoDate = getSessionIsoDate(session);
       const sessionDateLabel =
         formatSessionDateWithDay(session.dateStr, session.dateKey) ||
         session.dateStr ||
@@ -146,7 +171,7 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
 
       if (!Array.isArray(session.songs)) return;
 
-      session.songs.forEach((song) => {
+      session.songs.forEach((song, songIdx) => {
         const cleanTitle = (song.title || '').trim();
         const cleanArtist = (song.artist || '').trim();
         if (!cleanTitle && !cleanArtist) return;
@@ -155,6 +180,7 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
         const key = `${cleanTitle.toLowerCase()}:::${cleanArtist.toLowerCase()}`;
 
         if (!map.has(key)) {
+          // 1. First time this song is registered in any rehearsal session
           map.set(key, {
             id: key,
             title: cleanTitle,
@@ -174,10 +200,15 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
                 timestamp: sessionTimestamp,
               },
             ],
+            firstSessionDate: sessionIsoDate,
+            firstSessionTimestamp: sessionTimestamp,
+            latestSessionDate: sessionIsoDate,
             latestTimestamp: sessionTimestamp,
+            initialIndex: songIdx,
             playCount: 1,
           });
         } else {
+          // 2. Song appeared again in a later session (preserve firstSessionDate and initialIndex)
           const existing = map.get(key)!;
 
           // Merge part members (Union set)
@@ -216,18 +247,30 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
 
           if (sessionTimestamp > existing.latestTimestamp) {
             existing.latestTimestamp = sessionTimestamp;
+            existing.latestSessionDate = sessionIsoDate;
           }
         }
       });
     });
 
-    // Sort songs: most recently played/registered first, then alphabetical by title
+    // Sort songs: First Introduced Date descending (신곡 우선 - 최초 등록일 기준 내림차순)
     return Array.from(map.values()).sort((a, b) => {
-      const diff = b.latestTimestamp - a.latestTimestamp;
-      if (diff !== 0) return diff;
+      // 1. 처음 등록된 날짜가 더 최근인 곡이 위로 (내림차순)
+      const dateA = a.firstSessionDate || '';
+      const dateB = b.firstSessionDate || '';
+      if (dateA !== dateB) {
+        return dateB.localeCompare(dateA);
+      }
+      // 2. 동일 회차에 처음 들어온 곡들끼리는 기존 등록 인덱스 순서 유지
+      const idxA = a.initialIndex ?? 0;
+      const idxB = b.initialIndex ?? 0;
+      if (idxA !== idxB) {
+        return idxA - idxB;
+      }
+      // 3. Fallback: 곡명 가나다순
       return a.title.localeCompare(b.title, 'ko-KR');
     });
-  }, [sortedSessions]);
+  }, [sessions]);
 
   // Filter songs by search text and session filter
   const filteredSongs = useMemo(() => {
