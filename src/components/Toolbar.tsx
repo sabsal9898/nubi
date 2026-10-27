@@ -96,32 +96,24 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     >
       <ListMusic className="w-3.5 h-3.5 text-slate-600 shrink-0" />
       <span className="hidden sm:inline">누적 합주곡 현황</span>
-      <span className="sm:hidden">누적 현황</span>
+      <span className="sm:hidden">이력</span>
     </button>
   ) : null;
 
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-2xs select-none">
       <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        {/* [1번째 줄] 상단 타이틀 래퍼 (중앙 정렬 타이틀 + 우측 상단 분리 자물쇠 버튼) */}
-        <div className="relative w-full flex items-center justify-center pt-3 pb-2 my-[10px]">
+        {/* [1번째 줄] 상단 타이틀 래퍼 (중앙 정렬 타이틀) */}
+        <div
+          className="relative w-full flex items-center justify-center pt-3 pb-2 my-[10px]"
+          style={{ height: '50px' }}
+        >
           <h1
             className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight mx-auto text-center"
             style={{ fontFamily: 'Arial', lineHeight: '20px' }}
           >
             🎵 누비밴드 합주곡 셋리스트 🎵
           </h1>
-
-          {onLock && (
-            <button
-              type="button"
-              onClick={onLock}
-              title="화면 잠금"
-              className="absolute right-3 top-3 sm:right-4 sm:top-4 p-2 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
-            >
-              <Lock className="w-4 h-4 text-gray-400" />
-            </button>
-          )}
         </div>
 
         {/* [2번째 줄] 합주일 관리 & 전체 목록 통합 컨트롤 바 */}

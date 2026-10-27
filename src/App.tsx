@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
+import { toPng } from 'html-to-image';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { RehearsalSession, Song, PartType } from './types';
 import { INITIAL_SESSIONS } from './constants/defaultData';
@@ -616,34 +617,61 @@ export default function App() {
       const captureWidth = targetElement.offsetWidth || 1000;
       const captureHeight = targetElement.offsetHeight || 300;
 
-      const canvas = await html2canvas(targetElement, {
-        scale: 2, // 선명한 고해상도 (Retina)
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        width: captureWidth,
-        height: captureHeight,
-        windowWidth: 1200,
-        scrollX: 0,
-        scrollY: 0,
-        x: 0,
-        y: 0,
-        logging: false,
-        ignoreElements: (element: Element) => {
-          return (
-            element.classList.contains('manage-col') ||
-            element.getAttribute('data-col') === 'manage' ||
-            element.getAttribute('data-html2canvas-ignore') === 'true'
-          );
-        },
-      });
+      let dataUrl: string | null = null;
 
-      // 3. Validate canvas dimensions (guard against blank rendering)
-      if (!canvas || canvas.width < 100 || canvas.height < 100) {
-        throw new Error('생성된 배정표 이미지가 비어 있거나 크기가 비정상적입니다.');
+      try {
+        const canvas = await html2canvas(targetElement, {
+          scale: 2, // 선명한 고해상도 (Retina)
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          width: captureWidth,
+          height: captureHeight,
+          windowWidth: 1200,
+          scrollX: 0,
+          scrollY: 0,
+          x: 0,
+          y: 0,
+          logging: false,
+          ignoreElements: (element: Element) => {
+            return (
+              element.classList.contains('manage-col') ||
+              element.getAttribute('data-col') === 'manage' ||
+              element.getAttribute('data-html2canvas-ignore') === 'true'
+            );
+          },
+        });
+
+        if (canvas && canvas.width >= 100 && canvas.height >= 100) {
+          dataUrl = canvas.toDataURL('image/png');
+        }
+      } catch (h2cError) {
+        console.warn('html2canvas-pro error, attempting fallback to html-to-image:', h2cError);
       }
 
-      // 4. Convert to high-quality PNG data URL
-      const dataUrl = canvas.toDataURL('image/png');
+      // Fallback to html-to-image if canvas capture failed or returned empty
+      if (!dataUrl || dataUrl.length < 1000) {
+        dataUrl = await toPng(targetElement, {
+          cacheBust: true,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          width: captureWidth,
+          height: captureHeight,
+          filter: (domNode) => {
+            if (domNode instanceof HTMLElement) {
+              if (
+                domNode.classList.contains('manage-col') ||
+                domNode.getAttribute('data-col') === 'manage' ||
+                domNode.getAttribute('data-html2canvas-ignore') === 'true'
+              ) {
+                return false;
+              }
+            }
+            return true;
+          },
+        });
+      }
+
+      // Validate image data
       if (!dataUrl || dataUrl.length < 1000) {
         throw new Error('배정표 이미지 데이터 추출에 실패했습니다.');
       }
