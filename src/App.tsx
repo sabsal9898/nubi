@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { toCanvas } from 'html-to-image';
+import html2canvas from 'html2canvas';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { RehearsalSession, Song, PartType } from './types';
 import { INITIAL_SESSIONS } from './constants/defaultData';
@@ -595,60 +595,54 @@ export default function App() {
     return new Blob([uInt8Array], { type: contentType });
   };
 
-  // Helper: Renders high-resolution image directly from the real on-screen table DOM
-  // Applies temporary .is-capturing class for 100ms, captures canvas, and validates dimensions
+  // Helper: Renders high-resolution image directly using html2canvas
   const generateSheetPng = async (): Promise<string | null> => {
-    const tableContainer =
-      document.getElementById('sheet-table-capture-area') ||
-      document.getElementById('table-capture-target') ||
-      (document.querySelector('[data-capture-target="true"]') as HTMLElement | null);
-    if (!tableContainer) {
+    const targetElement =
+      document.getElementById('capture-target-table') ||
+      document.getElementById('sheet-table-capture-area');
+    if (!targetElement) {
       throw new Error('배정표 영역을 찾을 수 없습니다.');
     }
 
-    // 1. Apply temporary capturing mode class to the real DOM element
-    tableContainer.classList.add('is-capturing');
+    // 1. 캡처 직전 잠시 opacity 복구 및 포인터 비활성화 유지
+    const prevOpacity = targetElement.style.opacity;
+    const prevPointerEvents = targetElement.style.pointerEvents;
+    targetElement.style.opacity = '1';
 
     try {
-      // 2. Allow 100ms for browser layout recalculation and stabilization
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // 2. 폰트 및 스타일 계산을 위한 짧은 지연(Tick)
+      await new Promise((resolve) => setTimeout(resolve, 120));
 
-      const targetWidth = Math.max(tableContainer.scrollWidth, 1050);
-      const targetHeight = Math.max(tableContainer.scrollHeight, 250);
+      const captureWidth = targetElement.offsetWidth || 1000;
+      const captureHeight = targetElement.offsetHeight || 300;
 
-      const options = {
+      const canvas = await html2canvas(targetElement, {
+        scale: 2, // 선명한 고해상도 (Retina)
+        useCORS: true,
         backgroundColor: '#ffffff',
-        pixelRatio: 2,
-        width: targetWidth,
-        height: targetHeight,
-        filter: (node: HTMLElement) => {
-          if (
-            node.classList &&
-            (node.classList.contains('manage-col') ||
-              node.getAttribute('data-col') === 'manage' ||
-              node.getAttribute('data-html2canvas-ignore') === 'true')
-          ) {
-            return false;
-          }
-          return true;
+        width: captureWidth,
+        height: captureHeight,
+        windowWidth: 1200,
+        scrollX: 0,
+        scrollY: 0,
+        x: 0,
+        y: 0,
+        logging: false,
+        ignoreElements: (element: Element) => {
+          return (
+            element.classList.contains('manage-col') ||
+            element.getAttribute('data-col') === 'manage' ||
+            element.getAttribute('data-html2canvas-ignore') === 'true'
+          );
         },
-      };
+      });
 
-      // 3. Render real element directly to Canvas
-      let canvas: HTMLCanvasElement;
-      try {
-        canvas = await toCanvas(tableContainer, options);
-      } catch (renderErr) {
-        console.warn('Retrying capture with skipFonts:', renderErr);
-        canvas = await toCanvas(tableContainer, { ...options, skipFonts: true });
-      }
-
-      // 4. Validate canvas dimensions (guard against blank/zero-sized rendering)
+      // 3. Validate canvas dimensions (guard against blank rendering)
       if (!canvas || canvas.width < 100 || canvas.height < 100) {
         throw new Error('생성된 배정표 이미지가 비어 있거나 크기가 비정상적입니다.');
       }
 
-      // 5. Convert to high-quality PNG data URL
+      // 4. Convert to high-quality PNG data URL
       const dataUrl = canvas.toDataURL('image/png');
       if (!dataUrl || dataUrl.length < 1000) {
         throw new Error('배정표 이미지 데이터 추출에 실패했습니다.');
@@ -656,8 +650,9 @@ export default function App() {
 
       return dataUrl;
     } finally {
-      // 6. Always remove capturing mode class so the live UI returns to normal
-      tableContainer.classList.remove('is-capturing');
+      // 5. 캡처 완료 후 다시 투명화
+      targetElement.style.opacity = prevOpacity || '0';
+      targetElement.style.pointerEvents = prevPointerEvents || 'none';
     }
   };
 

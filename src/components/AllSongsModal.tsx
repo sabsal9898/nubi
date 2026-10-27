@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { X, Search, ListMusic, Calendar, Users, Music2, RotateCcw } from 'lucide-react';
+import { X, Search, ListMusic, Calendar, Music2, RotateCcw, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { RehearsalSession, PartType } from '../types';
 import {
   PART_LABELS,
@@ -321,6 +322,60 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
     return set.size;
   }, [filteredSongs]);
 
+  // Handler: Export current filtered list to Excel (.xlsx)
+  const handleExportExcel = () => {
+    if (filteredSongs.length === 0) return;
+
+    // Prepare rows for SheetJS
+    const rows = filteredSongs.map((song, idx) => {
+      const { dateRange, countLabel } = formatSessionDateRange(song.sessionDates);
+      const sessionPeriod = countLabel ? `${dateRange} ${countLabel}` : dateRange;
+
+      return {
+        '연번': idx + 1,
+        '곡명': song.title,
+        '아티스트': song.artist || '-',
+        '보컬': song.vocal.length > 0 ? song.vocal.join(', ') : '-',
+        '리드 기타': song.guitar1.length > 0 ? song.guitar1.join(', ') : '-',
+        '백킹 기타': song.guitar2.length > 0 ? song.guitar2.join(', ') : '-',
+        '베이스': song.bass.length > 0 ? song.bass.join(', ') : '-',
+        '드럼': song.drum.length > 0 ? song.drum.join(', ') : '-',
+        '건반': song.keyboard.length > 0 ? song.keyboard.join(', ') : '-',
+        '비고': song.notes.length > 0 ? song.notes.join(' / ') : '-',
+        '합주기간': sessionPeriod || '-',
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+
+    // Auto-fit column widths for clear readability in Excel
+    worksheet['!cols'] = [
+      { wch: 6 },  // 연번
+      { wch: 24 }, // 곡명
+      { wch: 20 }, // 아티스트
+      { wch: 14 }, // 보컬
+      { wch: 14 }, // 리드 기타
+      { wch: 14 }, // 백킹 기타
+      { wch: 14 }, // 베이스
+      { wch: 14 }, // 드럼
+      { wch: 14 }, // 건반
+      { wch: 20 }, // 비고
+      { wch: 18 }, // 합주기간
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '누적합주곡현황');
+
+    // Generate date YYYY-MM-DD
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const fileName = `누비밴드_누적합주곡현황_${yyyy}-${mm}-${dd}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -381,8 +436,8 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
             )}
           </div>
 
-          {/* Session / Date Filter */}
-          <div className="flex items-center gap-2">
+          {/* Session / Date Filter & Excel Export Button */}
+          <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 bg-gray-50 px-2.5 py-1.5 rounded-lg border border-gray-200">
               <Calendar className="w-3.5 h-3.5 text-gray-500" />
               <span className="text-xs text-gray-500 font-medium shrink-0">회차:</span>
@@ -415,47 +470,44 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
             )}
           </div>
         </div>
-
-        {/* 3. Table Content (Scrollable) */}
-        <div className="flex-1 overflow-auto bg-gray-50/40 p-2 sm:p-5">
+        <div className="flex-1 min-h-0 bg-gray-50/40 p-2 sm:p-4 flex flex-col">
           {filteredSongs.length > 0 ? (
-            <div className="bg-white rounded-xl border border-gray-300 shadow-2xs overflow-hidden">
-              <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
-                <table className="w-full border-separate border-spacing-0 text-xs text-left">
-                  <thead>
-                    <tr className="bg-[#bfdbfe] text-gray-900 font-bold text-center border-b border-gray-300 select-none">
-                      <th className="py-2.5 px-1 w-[38px] min-w-[38px] max-w-[38px] border-r border-b border-gray-300 text-center sticky left-0 z-20 bg-[#fed7aa]">
-                        연번
-                      </th>
-                      <th className="py-2.5 px-2 w-[135px] min-w-[125px] sm:min-w-[135px] max-w-[160px] border-r border-b border-gray-300 text-center sticky left-[38px] z-20 bg-[#fed7aa] shadow-[3px_0_5px_-2px_rgba(0,0,0,0.12)]">
-                        곡명 - 아티스트
-                      </th>
-                      <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300">
-                        {PART_LABELS.vocal}
-                      </th>
-                      <th className="py-2.5 px-2 min-w-[95px] border-r border-b border-gray-300">
-                        {PART_LABELS.guitar1}
-                      </th>
-                      <th className="py-2.5 px-2 min-w-[95px] border-r border-b border-gray-300">
-                        {PART_LABELS.guitar2}
-                      </th>
-                      <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300">
-                        {PART_LABELS.bass}
-                      </th>
-                      <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300">
-                        {PART_LABELS.drum}
-                      </th>
-                      <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300">
-                        {PART_LABELS.keyboard}
-                      </th>
-                      <th className="py-2.5 px-2 min-w-[100px] border-r border-b border-gray-300 bg-[#fecdd3]">
-                        {PART_LABELS.notes}
-                      </th>
-                      <th className="py-2.5 px-2.5 min-w-[120px] border-b border-gray-300 bg-[#fed7aa] text-center">
-                        합주기간
-                      </th>
-                    </tr>
-                  </thead>
+            <div className="bg-white rounded-xl border border-gray-300 shadow-2xs flex-1 min-h-0 overflow-auto scrollbar-thin scrollbar-thumb-gray-300">
+              <table className="w-full border-separate border-spacing-0 text-xs text-left">
+                <thead className="sticky top-0 z-20">
+                  <tr className="bg-[#bfdbfe] text-gray-900 font-bold text-center select-none">
+                    <th className="py-2.5 px-1 w-[38px] min-w-[38px] max-w-[38px] border-r border-b border-gray-300 text-center sticky top-0 left-0 z-30 bg-[#fed7aa]">
+                      연번
+                    </th>
+                    <th className="py-2.5 px-2 w-[135px] min-w-[125px] sm:min-w-[135px] max-w-[160px] border-r border-b border-gray-300 text-center sticky top-0 left-[38px] z-30 bg-[#fed7aa] shadow-[3px_0_5px_-2px_rgba(0,0,0,0.12)]">
+                      곡명 - 아티스트
+                    </th>
+                    <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300 sticky top-0 z-20 bg-[#bfdbfe]">
+                      {PART_LABELS.vocal}
+                    </th>
+                    <th className="py-2.5 px-2 min-w-[95px] border-r border-b border-gray-300 sticky top-0 z-20 bg-[#bfdbfe]">
+                      {PART_LABELS.guitar1}
+                    </th>
+                    <th className="py-2.5 px-2 min-w-[95px] border-r border-b border-gray-300 sticky top-0 z-20 bg-[#bfdbfe]">
+                      {PART_LABELS.guitar2}
+                    </th>
+                    <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300 sticky top-0 z-20 bg-[#bfdbfe]">
+                      {PART_LABELS.bass}
+                    </th>
+                    <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300 sticky top-0 z-20 bg-[#bfdbfe]">
+                      {PART_LABELS.drum}
+                    </th>
+                    <th className="py-2.5 px-2 min-w-[90px] border-r border-b border-gray-300 sticky top-0 z-20 bg-[#bfdbfe]">
+                      {PART_LABELS.keyboard}
+                    </th>
+                    <th className="py-2.5 px-2 min-w-[100px] border-r border-b border-gray-300 sticky top-0 z-20 bg-[#fecdd3]">
+                      {PART_LABELS.notes}
+                    </th>
+                    <th className="py-2.5 px-2.5 min-w-[120px] border-b border-gray-300 sticky top-0 z-20 bg-[#fed7aa] text-center">
+                      합주기간
+                    </th>
+                  </tr>
+                </thead>
 
                   <tbody>
                     {filteredSongs.map((song, idx) => {
@@ -573,7 +625,6 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
                     })}
                   </tbody>
                 </table>
-              </div>
             </div>
           ) : (
             <div className="py-16 flex flex-col items-center justify-center text-center">
@@ -602,17 +653,30 @@ export const AllSongsModal: React.FC<AllSongsModalProps> = ({
         </div>
 
         {/* 4. Modal Footer */}
-        <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-gray-200 bg-white flex items-center justify-between">
-          <div className="flex items-center gap-3 text-xs text-gray-500">
-
+        <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-gray-200 bg-white flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span>
+              조회 결과: <strong className="font-semibold text-gray-900">{filteredSongs.length}</strong>곡
+            </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg transition cursor-pointer"
-          >
-            닫기
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={filteredSongs.length === 0}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 border border-emerald-300 rounded-lg transition active:scale-98 cursor-pointer disabled:opacity-50"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>엑셀 다운로드</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 border border-gray-300 rounded-lg transition cursor-pointer"
+            >
+              닫기
+            </button>
+          </div>
         </div>
       </div>
     </div>

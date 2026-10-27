@@ -101,30 +101,31 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   ) : null;
 
   return (
-    <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-2xs select-none relative">
-      {onLock && (
-        <button
-          type="button"
-          onClick={onLock}
-          title="화면 잠금"
-          className="absolute top-3.5 right-3.5 sm:top-5 sm:right-6 text-gray-400 hover:text-gray-700 p-1.5 rounded-lg hover:bg-gray-100 transition cursor-pointer z-10"
-        >
-          <Lock className="w-4 h-4 text-gray-400" />
-        </button>
-      )}
-      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-5 sm:pt-7 pb-4 sm:pb-5">
-        {/* [1번째 줄] 메인 타이틀 영역 (화면 가로 중앙 정렬) */}
-        <div className="w-full flex justify-center items-center text-center mb-[20px]">
+    <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-2xs select-none">
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+        {/* [1번째 줄] 상단 타이틀 래퍼 (중앙 정렬 타이틀 + 우측 상단 분리 자물쇠 버튼) */}
+        <div className="relative w-full flex items-center justify-center pt-3 pb-2 my-[10px]">
           <h1
-            className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight leading-none text-center"
-            style={{ fontFamily: 'monospace' }}
+            className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight mx-auto text-center"
+            style={{ fontFamily: 'Arial', lineHeight: '20px' }}
           >
             🎵 누비밴드 합주곡 셋리스트 🎵
           </h1>
+
+          {onLock && (
+            <button
+              type="button"
+              onClick={onLock}
+              title="화면 잠금"
+              className="absolute right-3 top-3 sm:right-4 sm:top-4 p-2 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+            >
+              <Lock className="w-4 h-4 text-gray-400" />
+            </button>
+          )}
         </div>
 
         {/* [2번째 줄] 합주일 관리 & 전체 목록 통합 컨트롤 바 */}
-        <div className="w-full flex justify-between items-center gap-1.5 sm:gap-2">
+        <div className="w-full flex justify-between items-center gap-1.5 sm:gap-2 pb-3 sm:pb-3.5">
           {/* 좌측 그룹: [📅 합주일 | 토글] + [+] 추가 + [🗑️] 삭제 밀착 */}
           <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {DateSelectDropdown}

@@ -306,6 +306,49 @@ export const SheetTable: React.FC<SheetTableProps> = ({
     },
   ];
 
+  // Unique participating members in this session for mobile summary
+  const sessionParticipants = Array.from(
+    new Set([
+      ...getAssignedMembersForPart(session, 'vocal'),
+      ...getAssignedMembersForPart(session, 'guitar1'),
+      ...getAssignedMembersForPart(session, 'guitar2'),
+      ...getAssignedMembersForPart(session, 'bass'),
+      ...getAssignedMembersForPart(session, 'drum'),
+      ...getAssignedMembersForPart(session, 'keyboard'),
+    ])
+  ).filter(Boolean);
+
+  // Helper: Renders 2 or more members stacked vertically in mobile grid cells without commas
+  const renderStackedMembers = (memberList?: string[]) => {
+    if (!memberList || memberList.length === 0) {
+      return <span className="text-gray-300 select-none">&nbsp;</span>;
+    }
+
+    const names = memberList
+      .flatMap((m) => (m ? m.split(',') : []))
+      .map((name) => name.trim())
+      .filter(Boolean);
+
+    if (names.length === 0) {
+      return <span className="text-gray-300 select-none">&nbsp;</span>;
+    }
+
+    return (
+      <div className="flex flex-col items-center justify-center gap-0.5 leading-tight w-full py-0.5">
+        {names.map((name, idx) => (
+          <span
+            key={idx}
+            className={`whitespace-nowrap font-medium text-gray-800 tracking-tight ${
+              names.length > 1 ? 'text-[11px]' : 'text-[12px]'
+            }`}
+          >
+            {name}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
       {/* Printable / Capturable Clean White Card */}
@@ -410,11 +453,13 @@ export const SheetTable: React.FC<SheetTableProps> = ({
           </div>
         </div>
 
-        {/* Capturable Table Area */}
+        {/* ======================================================== */}
+        {/* A. DESKTOP / TABLET VIEW (sm and above): Horizontal Table */}
+        {/* ======================================================== */}
         <div
           id="sheet-table-capture-area"
           data-capture-target="true"
-          className="w-full bg-white"
+          className="hidden sm:block w-full bg-white"
         >
           <div className="overflow-x-auto relative scrollbar-thin scrollbar-thumb-gray-300">
             <table className="w-full border-separate border-spacing-0 text-xs sm:text-sm select-text border-t border-l border-gray-300">
@@ -655,7 +700,306 @@ export const SheetTable: React.FC<SheetTableProps> = ({
           </table>
         </div>
       </div>
-    </div>
+
+        {/* ======================================================== */}
+        {/* B. MOBILE VIEW (under sm): Grid Card List View           */}
+        {/* ======================================================== */}
+        <div className="block sm:hidden w-full select-none pt-1">
+          {/* 1. Mobile Top Information Box */}
+          <div className="border border-gray-200 rounded-[6px] overflow-hidden mb-3.5 bg-white shadow-2xs">
+            {/* 1행: 주황색 날짜 헤더 (가운데 정렬) */}
+            <div className="bg-[#fed7aa] text-gray-900 font-bold py-2.5 px-3 text-center text-sm border-b border-gray-200 tracking-tight">
+              {formatSessionDateWithDay(session.dateStr, session.dateKey)}
+            </div>
+            {/* 2행: 참여인원 (세로 분할선) */}
+            <div className="flex items-stretch bg-[#f8f9fb] text-xs">
+              <div className="w-20 min-w-[80px] bg-[#e2e8f0] text-center font-bold text-gray-700 py-2.5 px-1 border-r border-gray-200 flex items-center justify-center shrink-0">
+                참여인원
+              </div>
+              <div className="py-2.5 px-3 text-gray-800 font-medium break-keep leading-snug flex-1 flex items-center bg-[#f8f9fb]">
+                {sessionParticipants.length > 0 ? sessionParticipants.join(', ') : '-'}
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Song Grid Card List */}
+          {session.songs && session.songs.length > 0 ? (
+            <div className="flex flex-col">
+              {session.songs.map((song, index) => (
+                <div
+                  key={song.id}
+                  data-song-id={song.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDrop={(e) => handleDrop(e, index)}
+                  onTouchStart={(e) => handleTouchStart(e, index)}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
+                  className={`bg-white border border-gray-200 rounded-[6px] mb-[8px] overflow-hidden shadow-2xs transition-all ${
+                    draggedIndex === index ? 'opacity-40 scale-[0.99] border-dashed border-blue-400' : ''
+                  } ${dragOverIndex === index ? 'border-blue-500 ring-2 ring-blue-100' : ''}`}
+                >
+                  {/* [1층: 곡 정보 & 관리 도구] */}
+                  <div
+                    className="w-full flex justify-between items-center px-3 border-b border-blue-200"
+                    style={{ backgroundColor: '#bfdbfe', height: '40px' }}
+                  >
+                    {/* 좌측: 드래그 핸들 + [연번]. [곡명] + [- 아티스트] */}
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-2">
+                      <div
+                        className="cursor-grab active:cursor-grabbing py-1 text-slate-300 hover:text-slate-500 touch-none shrink-0"
+                        style={{
+                          marginLeft: '-8px',
+                          marginRight: '-4px',
+                          paddingLeft: '0px',
+                          paddingRight: '0px',
+                        }}
+                        title="드래그하여 순서 변경"
+                      >
+                        <GripVertical className="w-4 h-4 text-slate-300" />
+                      </div>
+                      <div className="flex items-baseline gap-1.5 min-w-0 truncate">
+                        <span className="text-[15px] font-bold text-slate-900 tracking-tight shrink-0">
+                          {index + 1}. {song.title}
+                        </span>
+                        {song.artist && (
+                          <span className="text-[13px] font-bold text-slate-500 truncate">
+                            - {song.artist}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 우측: 수정 & 삭제 버튼 */}
+                    <div className="flex items-center gap-1.5 shrink-0 text-xs font-medium">
+                      <button
+                        type="button"
+                        onClick={() => setSongToEdit(song)}
+                        title="곡 정보 수정"
+                        className="text-slate-400 hover:text-blue-600 p-1.5 rounded-lg hover:bg-white/80 transition cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSongToDelete({
+                            id: song.id,
+                            title: song.title,
+                            artist: song.artist,
+                          })
+                        }
+                        title="곡 삭제"
+                        className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white/80 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* [2층: 파트 이름 행 (6열 균등 분할)] */}
+                  <div className="grid grid-cols-6 border-b border-gray-200 bg-[#f8f9fb] text-center py-1.5 text-xs font-semibold text-gray-700">
+                    <div className="border-r border-gray-200">V</div>
+                    <div className="border-r border-gray-200">G1</div>
+                    <div className="border-r border-gray-200">G2</div>
+                    <div className="border-r border-gray-200">B</div>
+                    <div className="border-r border-gray-200">D</div>
+                    <div>K</div>
+                  </div>
+
+                  {/* [3층: 멤버 이름 행 (6열 균등 분할 - 2명 이상 세로 스택)] */}
+                  <div
+                    className="grid grid-cols-6 text-center text-xs text-gray-800 bg-white items-center"
+                    style={{ height: '40px' }}
+                  >
+                    <div
+                      onClick={() => onOpenAssignModalWithSong?.(song.id, 'vocal')}
+                      className="px-0.5 border-r border-gray-100 min-h-[34px] flex items-center justify-center cursor-pointer hover:bg-blue-50/50"
+                      title="보컬 파트 멤버 배정"
+                    >
+                      {renderStackedMembers(song.vocal)}
+                    </div>
+                    <div
+                      onClick={() => onOpenAssignModalWithSong?.(song.id, 'guitar1')}
+                      className="px-0.5 border-r border-gray-100 min-h-[34px] flex items-center justify-center cursor-pointer hover:bg-blue-50/50"
+                      title="리드 기타 파트 멤버 배정"
+                    >
+                      {renderStackedMembers(song.guitar1)}
+                    </div>
+                    <div
+                      onClick={() => onOpenAssignModalWithSong?.(song.id, 'guitar2')}
+                      className="px-0.5 border-r border-gray-100 min-h-[34px] flex items-center justify-center cursor-pointer hover:bg-blue-50/50"
+                      title="백킹 기타 파트 멤버 배정"
+                    >
+                      {renderStackedMembers(song.guitar2)}
+                    </div>
+                    <div
+                      onClick={() => onOpenAssignModalWithSong?.(song.id, 'bass')}
+                      className="px-0.5 border-r border-gray-100 min-h-[34px] flex items-center justify-center cursor-pointer hover:bg-blue-50/50"
+                      title="베이스 파트 멤버 배정"
+                    >
+                      {renderStackedMembers(song.bass)}
+                    </div>
+                    <div
+                      onClick={() => onOpenAssignModalWithSong?.(song.id, 'drum')}
+                      className="px-0.5 border-r border-gray-100 min-h-[34px] flex items-center justify-center cursor-pointer hover:bg-blue-50/50"
+                      title="드럼 파트 멤버 배정"
+                    >
+                      {renderStackedMembers(song.drum)}
+                    </div>
+                    <div
+                      onClick={() => onOpenAssignModalWithSong?.(song.id, 'keyboard')}
+                      className="px-0.5 min-h-[34px] flex items-center justify-center cursor-pointer hover:bg-blue-50/50"
+                      title="건반 파트 멤버 배정"
+                    >
+                      {renderStackedMembers(song.keyboard)}
+                    </div>
+                  </div>
+
+                  {/* [4층: 비고 행 (notes가 있을 경우)] */}
+                  {song.notes && song.notes.trim() && (
+                    <div className="px-3 py-1.5 bg-[#fff1f2] border-t border-rose-100 text-[11px] text-[#be123c] flex items-center gap-1.5 leading-snug">
+                      <span className="font-semibold shrink-0">비고:</span>
+                      <span className="break-words">{song.notes}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-12 flex flex-col items-center justify-center text-center bg-gray-50/50 rounded-xl border border-dashed border-gray-200 p-6">
+              <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center mb-2">
+                <Plus className="w-5 h-5" />
+              </div>
+              <p className="text-sm font-semibold text-gray-700">등록된 곡이 없습니다</p>
+              <p className="text-xs text-gray-400 mt-1">상단의 [+ 곡 추가] 버튼을 눌러 첫 곡을 등록해보세요.</p>
+            </div>
+          )}
+        </div>
+
+        {/* ======================================================== */}
+        {/* C. EXPORT CAPTURE TEMPLATE (Always 1000px Horizontal)    */}
+        {/* ======================================================== */}
+        <div
+          id="capture-target-table"
+          style={{
+            position: 'fixed',
+            left: 0,
+            top: 0,
+            width: '1000px',
+            minWidth: '1000px',
+            zIndex: -50,
+            opacity: 0,
+            backgroundColor: '#ffffff',
+            pointerEvents: 'none',
+          }}
+          className="p-5"
+          aria-hidden="true"
+        >
+          <div className="w-full bg-white border border-gray-300 rounded-lg overflow-hidden">
+            <table className="w-full border-separate border-spacing-0 text-sm select-text border-t border-l border-gray-300">
+              <thead>
+                {/* Row 1: Date Box Cell (연한 살구/오렌지) */}
+                <tr>
+                  <th
+                    colSpan={1}
+                    className="bg-[#fed7aa] text-gray-900 font-bold py-2.5 px-3 text-center tracking-tight text-sm select-none border-r border-b border-gray-300"
+                  >
+                    {formatSessionDateWithDay(session.dateStr, session.dateKey)}
+                  </th>
+                  <th
+                    colSpan={7}
+                    className="bg-white border-r border-b border-gray-300"
+                  />
+                </tr>
+
+                {/* Row 2: Column Headers */}
+                <tr>
+                  {columnHeaders.map((col) => (
+                    <th
+                      key={col.key}
+                      className={`${col.bg} ${col.width} text-gray-900 font-bold py-2.5 px-2 text-center tracking-tight text-sm select-none border-r border-b border-gray-300`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {/* Row 3: '참여인원' Summary Row */}
+                <tr className="bg-[#f1f5f9] font-medium text-gray-700">
+                  <td className="bg-[#e2e8f0] text-center font-bold py-2 px-2.5 text-gray-900 select-none border-r border-b border-gray-300">
+                    참여인원
+                  </td>
+                  <td className="py-2 px-1.5 text-center text-xs leading-snug break-keep border-r border-b border-gray-300">
+                    {getAssignedMembersForPart(session, 'vocal').join(', ') || '-'}
+                  </td>
+                  <td className="py-2 px-1.5 text-center text-xs leading-snug break-keep border-r border-b border-gray-300">
+                    {getAssignedMembersForPart(session, 'guitar1').join(', ') || '-'}
+                  </td>
+                  <td className="py-2 px-1.5 text-center text-xs leading-snug break-keep border-r border-b border-gray-300">
+                    {getAssignedMembersForPart(session, 'guitar2').join(', ') || '-'}
+                  </td>
+                  <td className="py-2 px-1.5 text-center text-xs leading-snug break-keep border-r border-b border-gray-300">
+                    {getAssignedMembersForPart(session, 'bass').join(', ') || '-'}
+                  </td>
+                  <td className="py-2 px-1.5 text-center text-xs leading-snug break-keep border-r border-b border-gray-300">
+                    {getAssignedMembersForPart(session, 'drum').join(', ') || '-'}
+                  </td>
+                  <td className="py-2 px-1.5 text-center text-xs leading-snug break-keep border-r border-b border-gray-300">
+                    {getAssignedMembersForPart(session, 'keyboard').join(', ') || '-'}
+                  </td>
+                  <td className="py-2 px-1.5 text-center text-xs text-gray-400 border-r border-b border-gray-300">
+                    -
+                  </td>
+                </tr>
+
+                {/* Song Rows */}
+                {session.songs && session.songs.map((song, index) => (
+                  <tr key={song.id} className="border-b border-gray-300">
+                    <td className="bg-[#fef9c3] font-bold py-2.5 px-3 border-r border-b border-gray-300 text-gray-900 leading-snug">
+                      <div>
+                        {index + 1}. {song.title}
+                      </div>
+                      {song.artist && (
+                        <div className="text-xs text-gray-600 font-normal mt-0.5">
+                          - {song.artist}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-1.5 text-center text-xs font-medium text-gray-900 border-r border-b border-gray-300">
+                      {song.vocal.join(', ') || ''}
+                    </td>
+                    <td className="py-2.5 px-1.5 text-center text-xs font-medium text-gray-900 border-r border-b border-gray-300">
+                      {song.guitar1.join(', ') || ''}
+                    </td>
+                    <td className="py-2.5 px-1.5 text-center text-xs font-medium text-gray-900 border-r border-b border-gray-300">
+                      {song.guitar2.join(', ') || ''}
+                    </td>
+                    <td className="py-2.5 px-1.5 text-center text-xs font-medium text-gray-900 border-r border-b border-gray-300">
+                      {song.bass.join(', ') || ''}
+                    </td>
+                    <td className="py-2.5 px-1.5 text-center text-xs font-medium text-gray-900 border-r border-b border-gray-300">
+                      {song.drum.join(', ') || ''}
+                    </td>
+                    <td className="py-2.5 px-1.5 text-center text-xs font-medium text-gray-900 border-r border-b border-gray-300">
+                      {song.keyboard.join(', ') || ''}
+                    </td>
+                    <td className="py-2.5 px-2 text-center text-xs text-gray-700 border-r border-b border-gray-300">
+                      {song.notes ? (
+                        <span className="text-[#be123c] font-medium">{song.notes}</span>
+                      ) : (
+                        ''
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
       {/* Edit Song Information Modal (Title, Artist, Notes with Parts Preserved) */}
       <EditSongModal
